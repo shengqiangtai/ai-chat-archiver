@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=380, initial-scale=1" />
+  <title>AI Chat Archiver</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 380px;
+      padding: 14px;
+      background: #111827;
+      color: #e5e7eb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .title { margin: 0; font-size: 15px; font-weight: 700; }
+    .status { font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 999px; background: #ef4444; }
+    .dot.online { background: #22c55e; }
+    .platform {
+      margin-top: 10px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #93c5fd;
+    }
+    .field { margin-top: 10px; }
+    .field label { display: block; font-size: 12px; margin-bottom: 4px; color: #9ca3af; }
+    .field input {
+      width: 100%;
+      border: 1px solid #374151;
+      background: #1f2937;
+      color: #e5e7eb;
+      border-radius: 8px;
+      font-size: 13px;
+      padding: 9px 10px;
+      outline: none;
+    }
+    .save {
+      margin-top: 12px;
+      width: 100%;
+      border: 0;
+      border-radius: 9px;
+      background: #3b82f6;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 10px;
+      cursor: pointer;
+    }
+    .save:disabled { background: #4b5563; cursor: not-allowed; }
+    .msg { margin-top: 10px; min-height: 18px; font-size: 12px; }
+    .msg.ok { color: #34d399; }
+    .msg.err { color: #f87171; }
+    .dash {
+      margin-top: 8px;
+      display: inline-block;
+      color: #93c5fd;
+      text-decoration: none;
+      font-size: 12px;
+    }
+    .recent { margin-top: 12px; border-top: 1px solid #374151; padding-top: 10px; }
+    .recent h3 { margin: 0 0 8px 0; font-size: 12px; color: #9ca3af; }
+    .item {
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .item .t {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #e5e7eb;
+    }
+    .item .p { color: #9ca3af; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <h1 class="title">AI Chat Archiver</h1>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">检测中</span></div>
+  </div>
+
+  <div id="platformBadge" class="platform">当前平台：未识别</div>
+
+  <div class="field">
+    <label for="titleInput">标题</label>
+    <input id="titleInput" type="text" placeholder="对话标题" />
+  </div>
+
+  <div class="field">
+    <label for="tagsInput">标签（逗号分隔）</label>
+    <input id="tagsInput" type="text" placeholder="例如：编程,论文" />
+  </div>
+
+  <button id="saveBtn" class="save">💾 保存当前对话</button>
+  <div id="messageBox" class="msg"></div>
+  <a class="dash" href="http://localhost:8765/dashboard" target="_blank">📂 打开 Dashboard</a>
+
+  <div class="recent">
+    <h3>最近保存（5条）</h3>
+    <div id="recentItems"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

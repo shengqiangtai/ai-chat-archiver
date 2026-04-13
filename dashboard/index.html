@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Chat Archiver Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --line: #374151;
+      --text: #e5e7eb;
+      --sub: #9ca3af;
+      --brand: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 20% -10%, #1b2a4a, transparent 30%), var(--bg);
+      color: var(--text);
+    }
+    .app { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .title { margin: 0; font-size: 22px; }
+    .tabs { display: flex; gap: 8px; margin: 14px 0; }
+    .tab {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tab.active { background: var(--brand); border-color: var(--brand); }
+    .card {
+      background: rgba(17, 24, 39, 0.95);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .stat .k { color: var(--sub); font-size: 12px; }
+    .stat .v { margin-top: 5px; font-size: 20px; font-weight: 700; }
+
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 12px; margin-top: 12px; }
+    .list-tools { display: flex; gap: 8px; margin-bottom: 8px; }
+    input, select, button, textarea {
+      font: inherit;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    input, select, textarea { width: 100%; }
+    button { cursor: pointer; }
+    button.primary { background: var(--brand); border-color: var(--brand); }
+    button.warn { background: var(--warn); border-color: var(--warn); color: #111827; }
+    button.danger { background: #7f1d1d; border-color: #7f1d1d; }
+
+    .chat-list { max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+    .chat-item {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+    }
+    .chat-item.active { border-color: var(--brand); }
+    .chat-item .t { font-weight: 600; }
+    .chat-item .m { color: var(--sub); font-size: 12px; margin-top: 4px; }
+
+    .detail-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .detail-content { margin-top: 8px; max-height: 75vh; overflow: auto; line-height: 1.65; }
+    .detail-content pre {
+      background: #0a0f1d;
+      border: 1px solid var(--line);
+      padding: 10px;
+      overflow: auto;
+      border-radius: 8px;
+    }
+    .detail-content table { border-collapse: collapse; width: 100%; }
+    .detail-content th, .detail-content td { border: 1px solid var(--line); padding: 6px; }
+
+    .hidden { display: none; }
+
+    .kb-subtabs { display: flex; gap: 8px; margin-bottom: 10px; }
+    .kb-subtab { padding: 7px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; }
+    .kb-subtab.active { border-color: var(--brand); color: #bfdbfe; }
+
+    .qa-wrap { display: grid; grid-template-rows: 1fr auto; height: 72vh; gap: 10px; }
+    .qa-list { overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--panel); }
+    .bubble { max-width: 82%; margin: 8px 0; padding: 10px; border-radius: 10px; line-height: 1.6; }
+    .bubble.user { margin-left: auto; background: #1d4ed8; }
+    .bubble.ai { background: var(--panel-2); border: 1px solid var(--line); }
+    .sources { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 8px; }
+    .source-card {
+      border: 1px solid var(--line);
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 8px;
+      margin-top: 6px;
+      font-size: 12px;
+    }
+    .qa-input { display: grid; grid-template-columns: 180px 1fr auto; gap: 8px; }
+
+    .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .progress { height: 10px; border-radius: 99px; background: #0f172a; border: 1px solid var(--line); overflow: hidden; }
+    .progress .bar { height: 100%; width: 0%; background: var(--ok); transition: width 0.2s ease; }
+    .log {
+      margin-top: 8px;
+      height: 220px;
+      overflow: auto;
+      background: #0f172a;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      font-family: ui-monospace, Menlo, Monaco, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    .semantic-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-2);
+      padding: 10px;
+      margin-top: 8px;
+    }
+    .semantic-item .meta { color: var(--sub); font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .manage-grid { grid-template-columns: 1fr; }
+      .qa-input { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <h1 class="title">AI Chat Archiver Dashboard</h1>
+      <button class="primary" id="refreshBtn">刷新</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="chats">聊天记录</button>
+      <button class="tab" data-tab="kb">🔍 知识库</button>
+    </div>
+
+    <section id="tab-chats">
+      <div class="card stats" id="stats"></div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="list-tools">
+            <select id="platformFilter">
+              <option value="">全部平台</option>
+              <option>ChatGPT</option>
+              <option>Claude</option>
+              <option>Gemini</option>
+              <option>DeepSeek</option>
+              <option>Poe</option>
+            </select>
+            <button id="loadChatsBtn">加载</button>
+          </div>
+
+          <div class="list-tools">
+            <input id="searchInput" placeholder="全文搜索..." />
+            <button id="searchBtn" class="primary">搜索</button>
+          </div>
+
+          <div id="chatList" class="chat-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="detail-header">
+            <div id="detailTitle">请选择左侧聊天</div>
+            <button id="deleteBtn" class="danger hidden">删除</button>
+          </div>
+          <div id="detailMeta" class="m"></div>
+          <div id="detailContent" class="detail-content"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-kb" class="hidden">
+      <div class="kb-subtabs">
+        <button class="kb-subtab active" data-kb-sub="qa">问答</button>
+        <button class="kb-subtab" data-kb-sub="manage">管理</button>
+        <button class="kb-subtab" data-kb-sub="semantic">语义搜索</button>
+      </div>
+
+      <div id="kb-qa">
+        <div class="qa-wrap card">
+          <div id="qaList" class="qa-list"></div>
+          <div class="qa-input">
+            <select id="qaPlatformFilter">
+              <option value="">全部平台</option>
+              <option>ChatGPT</option>
+              <option>Claude</option>
+              <option>Gemini</option>
+              <option>DeepSeek</option>
+              <option>Poe</option>
+            </select>
+            <textarea id="qaInput" rows="2" placeholder="输入你的问题，比如：我之前讨论过哪些机器学习话题？"></textarea>
+            <button id="qaSend" class="primary">发送</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="kb-manage" class="hidden">
+        <div class="manage-grid">
+          <div class="card">
+            <h3>知识库状态</h3>
+            <div id="kbStatus"></div>
+            <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="fullIndexBtn" class="warn">🔄 全量重建索引</button>
+              <button id="incIndexBtn">➕ 增量更新</button>
+            </div>
+            <div style="margin-top:10px;">
+              <div class="progress"><div id="indexProgressBar" class="bar"></div></div>
+              <div id="indexProgressText" class="m" style="margin-top:6px;">未开始</div>
+            </div>
+            <div id="indexLog" class="log"></div>
+          </div>
+
+          <div class="card">
+            <h3>Ollama</h3>
+            <div id="ollamaStatus"></div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <select id="ollamaModelSelect"></select>
+              <button id="switchModelBtn" class="primary">切换模型</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="kb-semantic" class="hidden">
+        <div class="card">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <input id="semanticInput" placeholder="语义搜索，例如：异步编程的最佳实践" />
+            <select id="semanticPlatformFilter" style="max-width:180px;">
+              <option value="">全部平台</option>
+              <option>ChatGPT</option>
+              <option>Claude</option>
+              <option>Gemini</option>
+              <option>DeepSeek</option>
+              <option>Poe</option>
+            </select>
+            <button id="semanticBtn" class="primary">检索</button>
+          </div>
+          <div id="semanticResults" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const API = "http://127.0.0.1:8765";
+
+    const statsEl = document.getElementById("stats");
+    const chatListEl = document.getElementById("chatList");
+    const detailTitleEl = document.getElementById("detailTitle");
+    const detailMetaEl = document.getElementById("detailMeta");
+    const detailContentEl = document.getElementById("detailContent");
+    const deleteBtn = document.getElementById("deleteBtn");
+
+    const platformFilterEl = document.getElementById("platformFilter");
+    const searchInputEl = document.getElementById("searchInput");
+
+    const qaListEl = document.getElementById("qaList");
+    const qaInputEl = document.getElementById("qaInput");
+    const qaSendEl = document.getElementById("qaSend");
+    const qaPlatformFilterEl = document.getElementById("qaPlatformFilter");
+
+    const kbStatusEl = document.getElementById("kbStatus");
+    const ollamaStatusEl = document.getElementById("ollamaStatus");
+    const ollamaModelSelectEl = document.getElementById("ollamaModelSelect");
+    const indexProgressBarEl = document.getElementById("indexProgressBar");
+    const indexProgressTextEl = document.getElementById("indexProgressText");
+    const indexLogEl = document.getElementById("indexLog");
+
+    const semanticInputEl = document.getElementById("semanticInput");
+    const semanticPlatformFilterEl = document.getElementById("semanticPlatformFilter");
+    const semanticResultsEl = document.getElementById("semanticResults");
+
+    let chats = [];
+    let selectedChatId = null;
+    let currentTaskId = null;
+    let progressTimer = null;
+
+    async function apiFetch(path, options = {}) {
+      const res = await fetch(`${API}${path}`, options);
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          detail = data.detail || detail;
+        } catch (e) {
+          // ignore
+        }
+        throw new Error(detail);
+      }
+      return res.json();
+    }
+
+    function formatDate(value) {
+      if (!value) return "";
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return value;
+      return d.toLocaleString();
+    }
+
+    function escapeHTML(text) {
+      const div = document.createElement("div");
+      div.textContent = text || "";
+      return div.innerHTML;
+    }
+
+    function setMainTab(tab) {
+      document.querySelectorAll(".tab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.tab === tab);
+      });
+      document.getElementById("tab-chats").classList.toggle("hidden", tab !== "chats");
+      document.getElementById("tab-kb").classList.toggle("hidden", tab !== "kb");
+    }
+
+    function setKbSubTab(name) {
+      document.querySelectorAll(".kb-subtab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.kbSub === name);
+      });
+      document.getElementById("kb-qa").classList.toggle("hidden", name !== "qa");
+      document.getElementById("kb-manage").classList.toggle("hidden", name !== "manage");
+      document.getElementById("kb-semantic").classList.toggle("hidden", name !== "semantic");
+    }
+
+    function renderStats(data) {
+      const byPlatform = data.by_platform || {};
+      const blocks = [
+        `<div class="stat"><div class="k">总对话数</div><div class="v">${data.total || 0}</div></div>`
+      ];
+      Object.entries(byPlatform).forEach(([platform, count]) => {
+        blocks.push(`<div class="stat"><div class="k">${escapeHTML(platform)}</div><div class="v">${count}</div></div>`);
+      });
+      statsEl.innerHTML = blocks.join("");
+    }
+
+    function renderChatList(list) {
+      if (!list.length) {
+        chatListEl.innerHTML = "<div class='m'>暂无记录</div>";
+        return;
+      }
+
+      chatListEl.innerHTML = list.map((chat) => `
+        <div class="chat-item ${chat.id === selectedChatId ? "active" : ""}" data-id="${chat.id}">
+          <div class="t">${escapeHTML(chat.title)}</div>
+          <div class="m">${escapeHTML(chat.platform)} · ${escapeHTML(chat.model || "N/A")} · ${chat.message_count || 0}条</div>
+          <div class="m">${escapeHTML(formatDate(chat.saved_at || chat.created_at))}</div>
+        </div>
+      `).join("");
+
+      chatListEl.querySelectorAll(".chat-item").forEach((item) => {
+        item.addEventListener("click", () => openChat(item.dataset.id));
+      });
+    }
+
+    async function loadStats() {
+      const data = await apiFetch("/stats");
+      renderStats(data);
+    }
+
+    async function loadChats() {
+      const platform = platformFilterEl.value;
+      const params = new URLSearchParams({ limit: "200" });
+      if (platform) params.set("platform", platform);
+      const data = await apiFetch(`/chats?${params.toString()}`);
+      chats = data.chats || [];
+      renderChatList(chats);
+    }
+
+    async function openChat(chatId) {
+      const chat = await apiFetch(`/chats/${chatId}`);
+      selectedChatId = chatId;
+
+      const meta = chat.meta || {};
+      detailTitleEl.textContent = meta.title || chatId;
+      detailMetaEl.textContent = `${meta.platform || ""} · ${meta.model || "N/A"} · ${formatDate(meta.saved_at || meta.created_at || "")}`;
+      detailContentEl.innerHTML = marked.parse(chat.content || "");
+      deleteBtn.classList.remove("hidden");
+      renderChatList(chats);
+    }
+
+    async function runSearch() {
+      const query = searchInputEl.value.trim();
+      if (!query) {
+        await loadChats();
+        return;
+      }
+      const body = {
+        query,
+        platform: platformFilterEl.value || null,
+        limit: 100,
+      };
+      const data = await apiFetch("/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const items = (data.results || []).map((x) => ({
+        id: x.id,
+        title: x.title,
+        platform: x.platform,
+        model: x.model,
+        saved_at: x.saved_at,
+        message_count: 0,
+      }));
+      renderChatList(items);
+    }
+
+    async function deleteCurrentChat() {
+      if (!selectedChatId) return;
+      const ok = window.confirm("确认删除该聊天记录？");
+      if (!ok) return;
+
+      await apiFetch(`/chats/${selectedChatId}`, { method: "DELETE" });
+      selectedChatId = null;
+      detailTitleEl.textContent = "请选择左侧聊天";
+      detailMetaEl.textContent = "";
+      detailContentEl.innerHTML = "";
+      deleteBtn.classList.add("hidden");
+      await Promise.all([loadStats(), loadChats()]);
+    }
+
+    function appendBubble(role, content) {
+      const wrap = document.createElement("div");
+      wrap.className = `bubble ${role}`;
+      if (role === "user") {
+        wrap.textContent = content;
+      } else {
+        wrap.innerHTML = marked.parse(content || "");
+      }
+      qaListEl.appendChild(wrap);
+      qaListEl.scrollTop = qaListEl.scrollHeight;
+      return wrap;
+    }
+
+    function renderSources(container, sources) {
+      if (!sources || sources.length === 0) return;
+
+      const box = document.createElement("div");
+      box.className = "sources";
+      box.innerHTML = "<div>📎 来源引用</div>";
+
+      sources.forEach((s) => {
+        const score = Math.round((s.score || 0) * 100);
+        const card = document.createElement("div");
+        card.className = "source-card";
+        card.innerHTML = `
+          <div><strong>${escapeHTML(s.platform || "")}</strong> · ${escapeHTML(s.title || "")}</div>
+          <div style="margin-top:4px;">相关度 ${score}%</div>
+          <button data-chat-id="${escapeHTML(s.chat_id || "")}" style="margin-top:6px;">查看原文</button>
+        `;
+        const btn = card.querySelector("button");
+        btn.addEventListener("click", async () => {
+          if (!s.chat_id) return;
+          setMainTab("chats");
+          await loadChats();
+          openChat(s.chat_id);
+        });
+        box.appendChild(card);
+      });
+
+      container.appendChild(box);
+      qaListEl.scrollTop = qaListEl.scrollHeight;
+    }
+
+    async function askStream() {
+      const question = qaInputEl.value.trim();
+      if (!question) return;
+
+      appendBubble("user", question);
+      qaInputEl.value = "";
+      qaSendEl.disabled = true;
+
+      const aiBubble = document.createElement("div");
+      aiBubble.className = "bubble ai";
+      aiBubble.textContent = "";
+      qaListEl.appendChild(aiBubble);
+      qaListEl.scrollTop = qaListEl.scrollHeight;
+
+      let raw = "";
+      let sources = [];
+
+      try {
+        const res = await fetch(`${API}/api/kb/qa/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: question,
+            mode: "concise",
+            top_k: 15,
+            top_n: 5,
+          }),
+        });
+
+        if (!res.ok || !res.body) {
+          throw new Error("流式请求失败");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop() || "";
+
+          for (const block of blocks) {
+            const line = block.split("\n").find((l) => l.startsWith("data:"));
+            if (!line) continue;
+
+            let payload = null;
+            try {
+              payload = JSON.parse(line.slice(5).trim());
+            } catch (e) {
+              continue;
+            }
+
+            if (payload.type === "token") {
+              raw += payload.content || "";
+              aiBubble.textContent = raw;
+            } else if (payload.type === "sources") {
+              sources = payload.sources || [];
+            } else if (payload.type === "done") {
+              break;
+            }
+          }
+          qaListEl.scrollTop = qaListEl.scrollHeight;
+        }
+
+        aiBubble.innerHTML = marked.parse(raw || "");
+        renderSources(aiBubble, sources);
+      } catch (err) {
+        aiBubble.textContent = `请求失败：${err.message || "未知错误"}`;
+      } finally {
+        qaSendEl.disabled = false;
+      }
+    }
+
+    function appendIndexLog(line) {
+      const now = new Date().toLocaleTimeString();
+      indexLogEl.textContent += `[${now}] ${line}\n`;
+      indexLogEl.scrollTop = indexLogEl.scrollHeight;
+    }
+
+    async function refreshKbStatus() {
+      const [status, ollama] = await Promise.all([
+        apiFetch("/api/kb/status"),
+        apiFetch("/api/kb/ollama/status"),
+      ]);
+
+      kbStatusEl.innerHTML = `
+        <div>总聊天数：${status.total_chats || 0}</div>
+        <div>总 Chunk 数：${status.total_chunks || 0}</div>
+        <div>向量库大小：${Math.round((status.vectorstore_size_bytes || 0) / 1024)} KB</div>
+        <div>最后索引时间：${escapeHTML(formatDate(status.last_index_time || "未执行"))}</div>
+        <div>索引状态：${status.is_indexing ? "进行中" : "空闲"}</div>
+      `;
+
+      ollamaStatusEl.innerHTML = `
+        <div>服务：<strong style="color:${ollama.available ? "#22c55e" : "#ef4444"}">${ollama.available ? "在线" : "离线"}</strong></div>
+        <div>当前模型：${escapeHTML(ollama.current_model || "-")}</div>
+      `;
+
+      const models = ollama.models || [];
+      ollamaModelSelectEl.innerHTML = models.map((m) =>
+        `<option value="${escapeHTML(m)}" ${m === ollama.current_model ? "selected" : ""}>${escapeHTML(m)}</option>`
+      ).join("");
+
+      if (models.length === 0) {
+        ollamaModelSelectEl.innerHTML = `<option value="${escapeHTML(ollama.current_model || "")}">${escapeHTML(ollama.current_model || "(无可用模型)")}</option>`;
+      }
+    }
+
+    async function startIndex(isIncremental) {
+      const path = isIncremental ? "/api/kb/reindex/incremental" : "/api/kb/reindex";
+      const data = await apiFetch(path, { method: "POST" });
+      currentTaskId = data.task_id;
+      indexProgressBarEl.style.width = "0%";
+      indexProgressTextEl.textContent = "任务已启动";
+      appendIndexLog(data.message || "索引任务已启动");
+      pollIndexProgress();
+    }
+
+    async function pollIndexProgress() {
+      if (!currentTaskId) return;
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
+
+      try {
+        const data = await apiFetch(`/api/kb/reindex/progress/${currentTaskId}`);
+        const total = data.total_files || 0;
+        const done = data.processed_files || 0;
+        const ratio = total > 0 ? Math.round((done / total) * 100) : 0;
+
+        indexProgressBarEl.style.width = `${ratio}%`;
+        indexProgressTextEl.textContent = `${done}/${total} files · ${data.total_chunks || 0} chunks · ${data.status}`;
+        appendIndexLog(`状态=${data.status}，进度=${done}/${total}，chunks=${data.total_chunks || 0}`);
+
+        if (data.status === "running" || data.status === "pending") {
+          progressTimer = setTimeout(pollIndexProgress, 2000);
+        } else {
+          if (data.status === "error") {
+            appendIndexLog(`错误：${data.error || "未知错误"}`);
+          }
+          await refreshKbStatus();
+        }
+      } catch (err) {
+        appendIndexLog(`轮询失败：${err.message || "未知错误"}`);
+      }
+    }
+
+    async function switchOllamaModel() {
+      const model = ollamaModelSelectEl.value;
+      if (!model) return;
+      await apiFetch("/api/kb/ollama/model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      appendIndexLog(`已切换模型：${model}`);
+      await refreshKbStatus();
+    }
+
+    async function runSemanticSearch() {
+      const query = semanticInputEl.value.trim();
+      if (!query) return;
+
+      const data = await apiFetch("/api/kb/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          top_k: 8,
+          platform_filter: semanticPlatformFilterEl.value || null,
+          score_threshold: 0.35,
+        }),
+      });
+
+      const results = data.hits || data.results || [];
+      if (results.length === 0) {
+        semanticResultsEl.innerHTML = "<div class='m'>没有匹配结果</div>";
+        return;
+      }
+
+      semanticResultsEl.innerHTML = results.map((item) => {
+        const score = Math.round((item.similarity || item.score || 0) * 100);
+        const text = (item.excerpt || item.content || "").replace(/\n+/g, " ").slice(0, 180);
+        return `
+          <div class="semantic-item">
+            <div><strong>${escapeHTML(item.platform || "")}</strong> · ${escapeHTML(item.title || "")}</div>
+            <div class="meta">相关度 ${score}% · ${escapeHTML(formatDate(item.created_at || ""))}</div>
+            <div style="margin-top:6px;">${escapeHTML(text)}...</div>
+            <button class="view-chat-btn" data-chat-id="${escapeHTML(item.doc_id || item.chat_id || "")}" style="margin-top:8px;">查看完整对话</button>
+          </div>
+        `;
+      }).join("");
+
+      semanticResultsEl.querySelectorAll(".view-chat-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const chatId = btn.dataset.chatId;
+          if (!chatId) return;
+          setMainTab("chats");
+          await loadChats();
+          openChat(chatId);
+        });
+      });
+    }
+
+    document.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        setMainTab(btn.dataset.tab);
+        if (btn.dataset.tab === "kb") {
+          await refreshKbStatus();
+        }
+      });
+    });
+
+    document.querySelectorAll(".kb-subtab").forEach((btn) => {
+      btn.addEventListener("click", () => setKbSubTab(btn.dataset.kbSub));
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", async () => {
+      await Promise.all([loadStats(), loadChats()]);
+    });
+    document.getElementById("loadChatsBtn").addEventListener("click", loadChats);
+    document.getElementById("searchBtn").addEventListener("click", runSearch);
+    deleteBtn.addEventListener("click", deleteCurrentChat);
+
+    qaSendEl.addEventListener("click", askStream);
+    qaInputEl.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        askStream();
+      }
+    });
+
+    document.getElementById("fullIndexBtn").addEventListener("click", () => startIndex(false));
+    document.getElementById("incIndexBtn").addEventListener("click", () => startIndex(true));
+    document.getElementById("switchModelBtn").addEventListener("click", switchOllamaModel);
+    document.getElementById("semanticBtn").addEventListener("click", runSemanticSearch);
+
+    (async function init() {
+      await Promise.all([loadStats(), loadChats()]);
+    })();
+  </script>
+</body>
+</html>

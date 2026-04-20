@@ -122,6 +122,7 @@ def api_kb_status():
         runtime = load_runtime_config()
         db = get_db()
         chat_stats = db.get_stats()
+        entity_stats = db.get_entity_stats()
 
         chroma_size = 0
         from app.core.config import CHROMA_PATH
@@ -137,6 +138,8 @@ def api_kb_status():
         return {
             "total_chats": chat_stats.get("total", 0),
             "total_chunks": chunk_stats.get("total_chunks", 0),
+            "total_entities": entity_stats.get("total_entities", 0),
+            "top_entities": entity_stats.get("top_entities", []),
             "by_platform": chunk_stats.get("by_platform", {}),
             "vectorstore_size_bytes": chroma_size,
             "last_index_time": runtime.get("last_index_time"),

@@ -58,6 +58,12 @@ export default function SourcePreview({ hit, index, onViewChat }: Props) {
 
       <p className="text-xs text-[#9ca3af] leading-relaxed line-clamp-3">{text}...</p>
 
+      {hit.entity_names && hit.entity_names.length > 0 && (
+        <div className="mt-2 text-[11px] text-[#93c5fd]">
+          实体: {hit.entity_names.slice(0, 4).join(', ')}
+        </div>
+      )}
+
       {onViewChat && (
         <button
           onClick={() => onViewChat(hit.doc_id)}

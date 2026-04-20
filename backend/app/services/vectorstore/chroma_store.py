@@ -70,6 +70,10 @@ class ChromaStore:
                         "created_at": c.created_at,
                         "url": c.url or "",
                         "source_path": c.source_path,
+                        "tags": ",".join(c.tags),
+                        "model_name": c.model_name or "",
+                        "turn_index": c.turn_index,
+                        "chunk_index": c.chunk_index,
                         "text_hash": c.text_hash,
                     }
                     for c in batch_chunks
@@ -123,6 +127,12 @@ class ChromaStore:
                 path=str(meta.get("source_path") or ""),
                 created_at=str(meta.get("created_at") or ""),
                 url=str(meta.get("url") or "") or None,
+                role_summary=str(meta.get("role_summary") or ""),
+                message_range=str(meta.get("message_range") or ""),
+                model_name=str(meta.get("model_name") or "") or None,
+                tags=[t for t in str(meta.get("tags") or "").split(",") if t],
+                turn_index=int(meta.get("turn_index") or 0),
+                chunk_index=int(meta.get("chunk_index") or 0),
             ))
 
         hits.sort(key=lambda h: h.score, reverse=True)

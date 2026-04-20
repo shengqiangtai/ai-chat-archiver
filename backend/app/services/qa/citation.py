@@ -84,15 +84,11 @@ def _extract_citations_from_text(text: str) -> list[Citation]:
 def _build_sources(hits: list[RetrievalHit]) -> list[SourceRef]:
     """将检索结果转为 SourceRef 列表。"""
     sources: list[SourceRef] = []
-    seen_docs: set[str] = set()
 
     for idx, hit in enumerate(hits, start=1):
-        key = hit.doc_id or f"{hit.platform}:{hit.title}"
-        if key in seen_docs:
-            continue
-        seen_docs.add(key)
         sources.append(SourceRef(
             source_id=str(idx),
+            chunk_id=hit.chunk_id,
             platform=hit.platform,
             title=hit.title,
             path=hit.path,
@@ -100,6 +96,8 @@ def _build_sources(hits: list[RetrievalHit]) -> list[SourceRef]:
             rerank_score=hit.rerank_score,
             url=hit.url,
             excerpt=hit.excerpt[:200] if hit.excerpt else "",
+            message_range=hit.message_range,
+            turn_index=hit.turn_index,
         ))
 
     return sources

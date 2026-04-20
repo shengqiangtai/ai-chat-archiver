@@ -8,8 +8,7 @@ import logging
 import time
 from dataclasses import asdict
 from datetime import datetime
-from pathlib import Path
-from typing import Any, AsyncGenerator, Callable, Optional
+from typing import AsyncGenerator, Callable
 
 from app.core.config import (
     RERANK_TOP_N,
@@ -18,7 +17,9 @@ from app.core.config import (
     UNLOAD_GENERATOR_AFTER_INFERENCE,
     set_last_index_time,
 )
-from app.models.schemas import AnswerResult, Chunk, RetrievalHit
+from app.db.sqlite import get_db
+from app.models.schemas import AnswerResult, Citation, SourceRef
+from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
 from app.services.ingest.chunker import chunk_document
 from app.services.ingest.deduper import (
@@ -28,15 +29,16 @@ from app.services.ingest.deduper import (
     register_file,
     should_skip_file,
 )
+from app.services.ingest.entity_extractor import extract_entities_from_chunks
 from app.services.ingest.loader import load_document, scan_chat_files
 from app.services.llm.generator import get_generator, unload_generator
 from app.services.llm.prompt_builder import (
     build_fallback_answer,
-    build_qa_prompt,
     build_user_prompt,
     get_system_prompt,
 )
 from app.services.qa.citation import parse_llm_output
+from app.services.qa.query_rewrite import rewrite_query
 from app.services.vectorstore.chroma_store import get_store
 from app.services.vectorstore.retrieval import retrieve
 
@@ -54,6 +56,14 @@ async def qa_answer(
     mode: str = "concise",
     top_k: int = RETRIEVAL_TOP_K,
     top_n: int = RERANK_TOP_N,
+    platform_filter: str | None = None,
+    model_filter: str | None = None,
+    tag_filter: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    retrieval_mode: str = "hybrid",
+    rerank_mode: str = "auto",
+    rewrite_query_enabled: bool = True,
     include_debug: bool = False,
 ) -> AnswerResult:
     """
@@ -61,7 +71,27 @@ async def qa_answer(
     """
     t0 = time.time()
 
-    hits = await asyncio.to_thread(retrieve, query, top_k, top_n)
+    rewrite = await rewrite_query(query, enable_llm=rewrite_query_enabled)
+    retrieval_query = rewrite.rewritten_query or query
+
+    hits = await asyncio.to_thread(
+        retrieve,
+        query=retrieval_query,
+        top_k=top_k,
+        top_n=top_n,
+        platform_filter=platform_filter,
+        model_filter=model_filter,
+        tag_filter=tag_filter,
+        date_from=date_from,
+        date_to=date_to,
+        score_threshold=0.0,
+        use_rerank=rerank_mode != "off",
+        retrieval_mode=retrieval_mode,
+        expand_neighbors=True,
+        neighbor_turn_window=1,
+        use_cache=True,
+        rerank_mode=rerank_mode,
+    )
     t_retrieve = time.time() - t0
 
     if not hits:
@@ -83,13 +113,53 @@ async def qa_answer(
         result.uncertainty = "未找到足够相关内容，以下为最相关的候选片段"
         return result
 
+    source_chunk_ids = [hit.chunk_id for hit in hits]
+    cached_answer = get_cache().get_answer(query, source_chunk_ids, mode=mode)
+    if cached_answer:
+        result = AnswerResult(
+            answer=str(cached_answer.get("answer") or ""),
+            citations=[Citation(**c) for c in (cached_answer.get("citations") or [])],
+            uncertainty=cached_answer.get("uncertainty"),
+            sources=[
+                SourceRef(
+                    chunk_id=str(s.get("chunk_id") or ""),
+                    source_id=str(s.get("source_id") or ""),
+                    platform=str(s.get("platform") or "Unknown"),
+                    title=str(s.get("title") or "Untitled"),
+                    path=str(s.get("path") or ""),
+                    score=float(s.get("score") or 0.0),
+                    rerank_score=s.get("rerank_score"),
+                    url=s.get("url"),
+                    excerpt=str(s.get("excerpt") or ""),
+                    message_range=str(s.get("message_range") or ""),
+                    turn_index=int(s.get("turn_index") or 0),
+                )
+                for s in (cached_answer.get("sources") or [])
+            ],
+            debug=cached_answer.get("debug") or {},
+        )
+        if include_debug:
+            result.debug = {
+                **result.debug,
+                "original_query": query,
+                "rewritten_query": rewrite.rewritten_query,
+                "rewrite_applied": rewrite.applied,
+                "rewrite_strategy": rewrite.strategy,
+                "retrieved_count": len(hits),
+                "retrieve_time": round(t_retrieve, 3),
+                "total_time": round(time.time() - t0, 3),
+                "answer_cache_hit": True,
+                "retrieved": [asdict(h) for h in hits],
+            }
+        return result
+
     user_prompt = build_user_prompt(query, hits, mode)
     system_prompt = get_system_prompt()
     t_prompt = time.time() - t0 - t_retrieve
 
     try:
         generator = get_generator()
-        raw_answer = await generator.generate(user_prompt, mode, system_prompt=system_prompt)
+        raw_answer = await generator.generate(user_prompt, mode=mode, system_prompt=system_prompt)
         t_generate = time.time() - t0 - t_retrieve - t_prompt
     except Exception as e:
         logger.warning("生成失败，使用降级回答: %s", e)
@@ -105,14 +175,32 @@ async def qa_answer(
     if include_debug:
         result.debug = {
             "original_query": query,
+            "rewritten_query": rewrite.rewritten_query,
+            "rewrite_applied": rewrite.applied,
+            "rewrite_strategy": rewrite.strategy,
             "retrieved_count": len(hits),
             "retrieve_time": round(t_retrieve, 3),
             "prompt_time": round(t_prompt, 3),
             "generate_time": round(t_generate, 3),
             "total_time": round(time.time() - t0, 3),
             "low_memory_mode": UNLOAD_GENERATOR_AFTER_INFERENCE,
+            "retrieval_mode": retrieval_mode,
+            "rerank_mode": rerank_mode,
             "retrieved": [asdict(h) for h in hits],
         }
+
+    get_cache().set_answer(
+        query,
+        source_chunk_ids,
+        {
+            "answer": result.answer,
+            "citations": [asdict(c) for c in result.citations],
+            "uncertainty": result.uncertainty,
+            "sources": [asdict(s) for s in result.sources],
+            "debug": result.debug,
+        },
+        mode=mode,
+    )
 
     total = time.time() - t0
     logger.info("QA 完成: query=%r, hits=%d, time=%.2fs", query[:50], len(hits), total)
@@ -124,12 +212,40 @@ async def qa_answer_stream(
     mode: str = "concise",
     top_k: int = RETRIEVAL_TOP_K,
     top_n: int = RERANK_TOP_N,
+    platform_filter: str | None = None,
+    model_filter: str | None = None,
+    tag_filter: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    retrieval_mode: str = "hybrid",
+    rerank_mode: str = "auto",
+    rewrite_query_enabled: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     流式 QA 问答。
     最后 yield 一个 [SOURCES_JSON] 标记携带来源信息。
     """
-    hits = await asyncio.to_thread(retrieve, query, top_k, top_n)
+    rewrite = await rewrite_query(query, enable_llm=rewrite_query_enabled)
+    retrieval_query = rewrite.rewritten_query or query
+
+    hits = await asyncio.to_thread(
+        retrieve,
+        query=retrieval_query,
+        top_k=top_k,
+        top_n=top_n,
+        platform_filter=platform_filter,
+        model_filter=model_filter,
+        tag_filter=tag_filter,
+        date_from=date_from,
+        date_to=date_to,
+        score_threshold=0.0,
+        use_rerank=rerank_mode != "off",
+        retrieval_mode=retrieval_mode,
+        expand_neighbors=True,
+        neighbor_turn_window=1,
+        use_cache=True,
+        rerank_mode=rerank_mode,
+    )
 
     if not hits:
         yield "知识库中未找到相关记录。"
@@ -153,7 +269,7 @@ async def qa_answer_stream(
 
     try:
         generator = get_generator()
-        async for token in generator.generate_stream(user_prompt, mode, system_prompt=system_prompt):
+        async for token in generator.generate_stream(user_prompt, mode=mode, system_prompt=system_prompt):
             yield token
     except Exception as e:
         logger.warning("流式生成失败: %s", e)
@@ -174,6 +290,9 @@ def rebuild_index(progress_cb: ProgressCallback | None = None) -> dict:
     """全量重建索引。"""
     store = get_store()
     store.reset()
+    db = get_db()
+    db.clear_kb_chunks()
+    get_cache().clear_all()
     embedder = get_embedder()
 
     files = scan_chat_files(STORAGE_ROOT)
@@ -194,6 +313,11 @@ def rebuild_index(progress_cb: ProgressCallback | None = None) -> dict:
                 embeddings = embedder.encode_docs(texts)
                 written = store.upsert_chunks(chunks, embeddings)
                 total_chunks += written
+                db.upsert_kb_chunks(chunks)
+                db.upsert_entity_mentions(
+                    extract_entities_from_chunks(chunks),
+                    created_at=doc.created_at,
+                )
                 register_chunks(chunks)
                 register_file(doc, len(chunks))
         except Exception as e:
@@ -230,6 +354,8 @@ def incremental_index(
     """增量索引 — 只处理新增或修改的文件。"""
     files = scan_chat_files(STORAGE_ROOT)
     store = get_store()
+    db = get_db()
+    get_cache().clear_all()
     embedder = get_embedder()
 
     selected: list[tuple[Path, Path]] = []
@@ -249,6 +375,7 @@ def incremental_index(
             doc = load_document(md_path, meta_path)
             clear_file_index(doc.doc_id, doc.path)
             store.delete_by_doc_id(doc.doc_id)
+            db.delete_kb_chunks_by_doc(doc.doc_id)
 
             chunks = chunk_document(doc)
             if chunks:
@@ -258,6 +385,11 @@ def incremental_index(
                     embeddings = embedder.encode_docs(texts)
                     written = store.upsert_chunks(unique_chunks, embeddings)
                     total_chunks += written
+                    db.upsert_kb_chunks(unique_chunks)
+                    db.upsert_entity_mentions(
+                        extract_entities_from_chunks(unique_chunks),
+                        created_at=doc.created_at,
+                    )
                     register_chunks(unique_chunks)
                 register_file(doc, len(chunks))
         except Exception as e:
@@ -289,4 +421,7 @@ def incremental_index(
 def delete_doc_index(doc_id: str) -> int:
     """删除某个文档的索引。"""
     store = get_store()
-    return store.delete_by_doc_id(doc_id)
+    deleted = store.delete_by_doc_id(doc_id)
+    get_db().delete_kb_chunks_by_doc(doc_id)
+    get_cache().clear_all()
+    return deleted

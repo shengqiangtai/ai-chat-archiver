@@ -1,23 +1,72 @@
 # Architecture
 
-AI Chat Archiver is a local-first system with 4 layers:
+AI Chat Archiver 是一个本地优先的 AI 对话归档与 RAG 系统，当前由 4 层组成：
 
-1. Browser extension (collection)
-2. FastAPI server (processing)
-3. Local filesystem + SQLite (storage/index)
-4. Dashboard (read/search/view)
+1. 浏览器插件：采集 ChatGPT、Claude、Gemini、DeepSeek、Poe 等页面中的对话。
+2. FastAPI 后端：负责持久化、索引、检索、问答与流式输出。
+3. 本地存储层：文件系统 + SQLite + ChromaDB。
+4. Dashboard：查看归档、执行检索、发起知识库问答。
 
 ## Data Flow
 
-- Content scripts extract chat messages from supported AI sites.
-- Extension sends data to local FastAPI service.
-- Server writes markdown/html/meta files and indexes text into SQLite FTS.
-- Dashboard queries server APIs for list/search/detail/topic views.
+### 1. Collection
+
+- `extension/content_scripts/*` 从页面 DOM 提取消息。
+- 插件将结构化对话发送给后端。
+- 后端将每次对话落盘为 `AI-Chats/<platform>/<year>/<date_title>/chat.md` 与 `meta.json`。
+- 同时把聊天级元数据与全文内容写入 SQLite 的 `chats` / `chats_fts`，用于聊天列表和全文搜索。
+
+### 2. Indexing
+
+- `backend/app/services/ingest/loader.py` 扫描 `chat.md + meta.json`。
+- `backend/app/services/ingest/parser.py` 将 markdown 解析为消息列表，并按问答轮次分组。
+- `backend/app/services/ingest/chunker.py` 优先按对话轮次切块，必要时对超长轮次做滑动窗口切分。
+- `backend/app/services/embedding/embedder.py` 为 chunk 生成向量。
+- chunk 会同时写入：
+  - ChromaDB：用于 dense retrieval。
+  - SQLite `kb_chunks` / `kb_chunks_fts`：用于 chunk 级关键词检索、邻近轮次扩展和 metadata 查询。
+- 索引阶段还会抽取轻量实体，并写入 SQLite `kb_entities` / `kb_entity_mentions` / `kb_entity_edges`。
+- `backend/app/services/ingest/deduper.py` + SQLite `file_index` / `chunk_hashes` 用于增量索引与重复检测。
+
+### 3. Retrieval
+
+- `backend/app/services/qa/query_rewrite.py` 会在提问含有“上次 / 之前 / 那个”等指代时，先做独立查询改写。
+- `backend/app/services/vectorstore/retrieval.py` 提供五种检索模式：
+  - `vector`：纯向量检索。
+  - `keyword`：纯 FTS 检索。
+  - `hybrid`：向量检索 + FTS 双路召回，再用 RRF 融合。
+  - `entity`：基于实体索引和共现边扩展后的实体检索。
+  - `mix`：向量检索 + FTS + entity 三路融合。
+- 召回后可选 cross-encoder rerank。
+- QA 模式下会根据命中的 `turn_index` 自动扩展相邻轮次，减少片段化上下文。
+- 检索结果会进入 SQLite 查询缓存。
+
+### 4. QA
+
+- `backend/app/services/qa/pipeline.py` 编排：
+  - hybrid retrieval
+  - rerank
+  - neighbor turn expansion
+  - prompt construction
+  - local LLM generation
+  - citation parsing
+  - answer cache
+- `backend/app/services/llm/generator.py` 支持 LM Studio / Ollama / transformers。
+- `backend/app/services/qa/citation.py` 对回答做引用解析，并校验引用编号是否与检索片段一致。
+
+## Storage Layout
+
+- `AI-Chats/`: 原始归档文件。
+- `AI-Chats/index.db`: 聊天级搜索、chunk 级关键词索引、增量索引状态。
+- `backend/data/chroma/`: 向量索引。
+- `backend/data/cache/query_cache.db`: 检索缓存与回答缓存。
 
 ## Key Modules
 
-- `extension/content_scripts/*`: site adapters
-- `extension/background.js`: API forwarding and retry queue
-- `server/main.py`: FastAPI routes
-- `server/storage.py`: persistence, topic merge, export
-- `dashboard/index.html`: dashboard UI (chat + topic views)
+- `backend/app/api/routes_docs.py`: 聊天记录 CRUD 与全文搜索。
+- `backend/app/api/routes_ingest.py`: 全量 / 增量索引管理。
+- `backend/app/api/routes_search.py`: 知识库检索接口。
+- `backend/app/api/routes_qa.py`: 知识库问答接口。
+- `backend/app/services/qa/query_rewrite.py`: 查询改写。
+- `backend/app/services/vectorstore/retrieval.py`: hybrid retrieval 主链路。
+- `backend/app/services/qa/pipeline.py`: RAG orchestration。

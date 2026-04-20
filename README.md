@@ -209,16 +209,30 @@ ai-chat-archiver/
 
 ```
 用户提问
+  → Query Rewrite（含指代词时改写为独立检索问题）
   → Query 预处理（去停用词、规则改写）
-  → Embedding 编码（Qwen3-Embedding-0.6B，查询侧加指令前缀）
-  → 向量检索（ChromaDB，top_k=15）
+  → 轻量实体扩展（SQLite entity index，共现边按 turn 建立）
+  → 多路召回
+      - 向量检索（ChromaDB，top_k=15）
+      - 关键词检索（SQLite FTS5，chunk 级）
+      - 实体检索（entity → chunks）
+  → Hybrid / Mix 融合（RRF）
   → Rerank 精排（Qwen3-Reranker-0.6B，保留 top_n=6）
+  → 相邻轮次扩展（补齐上下文）
   → Context 打包（控制总长度 ≤ 2800 字符）
   → 生成回答（LM Studio / Ollama / transformers，严格约束 Prompt）
   → 引用解析（提取 [Source X] 标注）
-  → 幻觉检测（验证引用真实性）
+  → 引用校验（验证引用编号与来源一致）
+  → 两层缓存（retrieval cache + answer cache）
   → 返回带来源引用的最终答案
 ```
+
+语义搜索页支持查看检索调试信息，包括：
+- 改写后的查询
+- Query / Expanded entities
+- Dense / Keyword / Entity / Final Top hits
+- 是否命中缓存
+- 各阶段候选数量
 
 ---
 

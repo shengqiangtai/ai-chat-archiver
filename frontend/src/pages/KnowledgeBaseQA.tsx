@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
 import { api } from '../api/client'
-import type { SourceRef, SSEEvent } from '../types'
+import type { RetrievalDebug, RerankMode, SourceRef, SSEEvent } from '../types'
 import SourcePreview from '../components/SourcePreview'
 import ReindexPanel from '../components/ReindexPanel'
 import SearchBox from '../components/SearchBox'
@@ -25,12 +25,18 @@ export default function KnowledgeBaseQA() {
   const [sending, setSending] = useState(false)
   const [platform, setPlatform] = useState('')
   const [mode, setMode] = useState<'concise' | 'detailed'>('concise')
+  const [qaRetrievalMode, setQaRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('hybrid')
+  const [qaRerankMode, setQaRerankMode] = useState<RerankMode>('auto')
   const listRef = useRef<HTMLDivElement>(null)
 
   // 语义搜索状态
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchPlatform, setSearchPlatform] = useState('')
+  const [searchRetrievalMode, setSearchRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('hybrid')
+  const [searchRerankMode, setSearchRerankMode] = useState<RerankMode>('auto')
+  const [searchDebug, setSearchDebug] = useState<RetrievalDebug | null>(null)
+  const [searchRewrite, setSearchRewrite] = useState<{ rewritten?: string; applied?: boolean; strategy?: string } | null>(null)
 
   const scrollToBottom = useCallback(() => {
     if (listRef.current) {
@@ -61,6 +67,9 @@ export default function KnowledgeBaseQA() {
           top_k: 15,
           top_n: 5,
           platform_filter: platform || null,
+          retrieval_mode: qaRetrievalMode,
+          rerank_mode: qaRerankMode,
+          rewrite_query: true,
         }),
       })
 
@@ -140,10 +149,25 @@ export default function KnowledgeBaseQA() {
   const handleSemanticSearch = async (query: string) => {
     setSearchLoading(true)
     try {
-      const data = await api.kbSearch(query, 10, searchPlatform || undefined)
+      const data = await api.kbSearch(query, {
+        topK: 10,
+        platformFilter: searchPlatform || undefined,
+        retrievalMode: searchRetrievalMode,
+        rerankMode: searchRerankMode,
+        includeDebug: true,
+        rewriteQuery: true,
+      })
       setSearchResults(data.hits || [])
+      setSearchDebug(data.debug || null)
+      setSearchRewrite({
+        rewritten: data.rewritten_query,
+        applied: data.rewrite_applied,
+        strategy: data.rewrite_strategy,
+      })
     } catch {
       setSearchResults([])
+      setSearchDebug(null)
+      setSearchRewrite(null)
     } finally {
       setSearchLoading(false)
     }
@@ -201,6 +225,26 @@ export default function KnowledgeBaseQA() {
               />
               详细
             </label>
+            <select
+              value={qaRetrievalMode}
+              onChange={(e) => setQaRetrievalMode(e.target.value as 'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix')}
+              className="bg-[#1f2937] border border-[#374151] rounded px-2 py-1 text-[#e5e7eb]"
+            >
+              <option value="hybrid">Hybrid</option>
+              <option value="vector">Vector</option>
+              <option value="keyword">Keyword</option>
+              <option value="entity">Entity</option>
+              <option value="mix">Mix</option>
+            </select>
+            <select
+              value={qaRerankMode}
+              onChange={(e) => setQaRerankMode(e.target.value as RerankMode)}
+              className="bg-[#1f2937] border border-[#374151] rounded px-2 py-1 text-[#e5e7eb]"
+            >
+              <option value="auto">Rerank Auto</option>
+              <option value="off">Rerank Off</option>
+              <option value="on">Rerank On</option>
+            </select>
           </div>
 
           {/* 消息列表 */}
@@ -310,13 +354,121 @@ export default function KnowledgeBaseQA() {
       {/* 语义搜索 */}
       {subTab === 'semantic' && (
         <div className="bg-[#111827] border border-[#374151] rounded-xl p-4 space-y-4">
-          <SearchBox
-            placeholder="语义搜索，例如：异步编程的最佳实践"
-            onSearch={handleSemanticSearch}
-            loading={searchLoading}
-            platformFilter={searchPlatform}
-            onPlatformChange={setSearchPlatform}
-          />
+          <div className="space-y-3">
+            <SearchBox
+              placeholder="语义搜索，例如：异步编程的最佳实践"
+              onSearch={handleSemanticSearch}
+              loading={searchLoading}
+              platformFilter={searchPlatform}
+              onPlatformChange={setSearchPlatform}
+            />
+            <div className="flex items-center gap-2 text-xs text-[#9ca3af]">
+              <span>检索模式</span>
+              <select
+                value={searchRetrievalMode}
+                onChange={(e) => setSearchRetrievalMode(e.target.value as 'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix')}
+                className="bg-[#1f2937] border border-[#374151] rounded px-2 py-1 text-[#e5e7eb]"
+              >
+                <option value="hybrid">Hybrid</option>
+                <option value="vector">Vector</option>
+                <option value="keyword">Keyword</option>
+                <option value="entity">Entity</option>
+                <option value="mix">Mix</option>
+              </select>
+              <select
+                value={searchRerankMode}
+                onChange={(e) => setSearchRerankMode(e.target.value as RerankMode)}
+                className="bg-[#1f2937] border border-[#374151] rounded px-2 py-1 text-[#e5e7eb]"
+              >
+                <option value="auto">Rerank Auto</option>
+                <option value="off">Rerank Off</option>
+                <option value="on">Rerank On</option>
+              </select>
+            </div>
+          </div>
+
+          {searchRewrite && (
+            <div className="bg-[#0f172a] border border-[#334155] rounded-xl p-3 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[#cbd5e1] font-medium">检索改写</span>
+                <span className={`px-2 py-0.5 rounded ${searchRewrite.applied ? 'bg-[#1d4ed8]/20 text-[#93c5fd]' : 'bg-[#334155] text-[#94a3b8]'}`}>
+                  {searchRewrite.strategy || 'identity'}
+                </span>
+              </div>
+              <div className="text-[#94a3b8]">
+                {searchRewrite.applied ? '已改写为更适合检索的独立查询。' : '本次查询未做实质改写。'}
+              </div>
+              {searchRewrite.rewritten && (
+                <div className="text-[#e2e8f0]">{searchRewrite.rewritten}</div>
+              )}
+            </div>
+          )}
+
+          {searchDebug && (searchDebug.query_entities?.length || searchDebug.expanded_entities?.length) && (
+            <div className="bg-[#0f172a] border border-[#334155] rounded-xl p-3 text-xs space-y-2">
+              <div className="text-[#cbd5e1] font-medium">实体扩展</div>
+              {searchDebug.query_entities && searchDebug.query_entities.length > 0 && (
+                <div className="text-[#94a3b8]">
+                  Query entities: <span className="text-[#e2e8f0]">{searchDebug.query_entities.join(', ')}</span>
+                </div>
+              )}
+              {searchDebug.expanded_entities && searchDebug.expanded_entities.length > 0 && (
+                <div className="text-[#94a3b8]">
+                  Expanded entities: <span className="text-[#e2e8f0]">{searchDebug.expanded_entities.join(', ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {searchDebug && (
+            <div className="bg-[#0b1220] border border-[#243244] rounded-xl p-4 space-y-4">
+              <div className="flex flex-wrap gap-2 text-xs">
+                {[
+                  ['dense', searchDebug.dense_count ?? '-'],
+                  ['keyword', searchDebug.keyword_count ?? '-'],
+                  ['entity', searchDebug.entity_count ?? '-'],
+                  ['candidate', searchDebug.candidate_count],
+                  ['final', searchDebug.final_count],
+                  ['rerank', searchDebug.rerank_applied ? 'on' : searchDebug.rerank_reason || 'off'],
+                  ['cache', searchDebug.cache_hit ? 'hit' : 'miss'],
+                ].map(([label, value]) => (
+                  <div key={label} className="px-2 py-1 rounded bg-[#162033] text-[#cbd5e1]">
+                    {label}: {value}
+                  </div>
+                ))}
+              </div>
+              <div className="text-xs text-[#94a3b8]">
+                rerank requested: <span className="text-[#e2e8f0]">{searchDebug.rerank_requested_mode || 'auto'}</span>
+                {' · '}
+                effective: <span className="text-[#e2e8f0]">{searchDebug.rerank_effective_mode || 'off'}</span>
+                {' · '}
+                reason: <span className="text-[#e2e8f0]">{searchDebug.rerank_reason || 'disabled'}</span>
+                {' · '}
+                elapsed: <span className="text-[#e2e8f0]">{searchDebug.rerank_elapsed_ms ?? 0}ms</span>
+                {' · '}
+                candidates: <span className="text-[#e2e8f0]">{searchDebug.rerank_candidate_count ?? 0}/{searchDebug.rerank_candidate_limit ?? 0}</span>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-3">
+                {[
+                  { title: 'Dense Top', hits: searchDebug.dense_hits },
+                  { title: 'Keyword Top', hits: searchDebug.keyword_hits },
+                  { title: 'Entity Top', hits: searchDebug.entity_hits },
+                  { title: 'Final Top', hits: searchDebug.final_hits },
+                ].map(({ title, hits }) => (
+                  <div key={title} className="space-y-2">
+                    <div className="text-xs font-medium text-[#93c5fd]">{title}</div>
+                    {hits.length === 0 ? (
+                      <div className="text-xs text-[#64748b]">无结果</div>
+                    ) : (
+                      hits.slice(0, 3).map((hit, i) => (
+                        <SourcePreview key={`${title}-${hit.chunk_id}-${i}`} hit={hit} index={i} />
+                      ))
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {searchResults.length === 0 && !searchLoading && (
             <div className="text-center text-[#6b7280] py-10 text-sm">输入关键词进行语义检索</div>

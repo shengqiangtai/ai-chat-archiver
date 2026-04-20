@@ -1,3 +1,5 @@
+import type { KbSearchResponse, RerankMode } from '../types'
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8765'
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -43,21 +45,35 @@ export const api = {
   reindexIncremental: () => request<any>('/api/kb/reindex/incremental', { method: 'POST' }),
   getIndexProgress: (taskId: string) => request<any>(`/api/kb/reindex/progress/${taskId}`),
 
-  kbSearch: (query: string, topK = 10, platformFilter?: string) =>
-    request<any>('/api/kb/search', {
+  kbSearch: (
+    query: string,
+    options?: {
+      topK?: number
+      platformFilter?: string
+      retrievalMode?: 'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'
+      rerankMode?: RerankMode
+      includeDebug?: boolean
+      rewriteQuery?: boolean
+    },
+  ) =>
+    request<KbSearchResponse>('/api/kb/search', {
       method: 'POST',
       body: JSON.stringify({
         query,
-        top_k: topK,
-        platform_filter: platformFilter || null,
+        top_k: options?.topK ?? 10,
+        platform_filter: options?.platformFilter || null,
+        retrieval_mode: options?.retrievalMode || 'hybrid',
+        rerank_mode: options?.rerankMode || 'auto',
+        include_debug: options?.includeDebug ?? false,
+        rewrite_query: options?.rewriteQuery ?? true,
         score_threshold: 0.25,
       }),
     }),
 
-  kbQA: (query: string, mode = 'concise', topK = 15, topN = 5) =>
+  kbQA: (query: string, mode = 'concise', topK = 15, topN = 5, rerankMode: RerankMode = 'auto') =>
     request<any>('/api/kb/qa', {
       method: 'POST',
-      body: JSON.stringify({ query, mode, top_k: topK, top_n: topN }),
+      body: JSON.stringify({ query, mode, top_k: topK, top_n: topN, rerank_mode: rerankMode }),
     }),
 
   kbQAStreamUrl: () => `${API_BASE}/api/kb/qa/stream`,

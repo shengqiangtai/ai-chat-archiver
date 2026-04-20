@@ -50,9 +50,9 @@ class QueryCache:
             """)
             conn.commit()
 
-    def get_retrieval(self, query: str) -> Optional[list[dict]]:
+    def get_retrieval(self, query: str, options: Optional[dict[str, Any]] = None) -> Optional[list[dict]]:
         """获取检索结果缓存。"""
-        key = text_hash(query.strip().lower())
+        key = self._retrieval_key(query, options)
         with sqlite3.connect(str(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT result, created_at FROM retrieval_cache WHERE query_hash = ?", (key,)
@@ -67,9 +67,14 @@ class QueryCache:
         except Exception:
             return None
 
-    def set_retrieval(self, query: str, results: list[dict]) -> None:
+    def set_retrieval(
+        self,
+        query: str,
+        results: list[dict],
+        options: Optional[dict[str, Any]] = None,
+    ) -> None:
         """设置检索结果缓存。"""
-        key = text_hash(query.strip().lower())
+        key = self._retrieval_key(query, options)
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO retrieval_cache(query_hash, query, result, created_at) VALUES (?,?,?,?)",
@@ -77,9 +82,14 @@ class QueryCache:
             )
             conn.commit()
 
-    def get_answer(self, query: str, source_ids: list[str]) -> Optional[dict]:
+    def get_answer(
+        self,
+        query: str,
+        source_ids: list[str],
+        mode: str = "concise",
+    ) -> Optional[dict]:
         """获取最终回答缓存。"""
-        cache_key = text_hash(f"{query.strip().lower()}|{'|'.join(sorted(source_ids))}")
+        cache_key = self._answer_key(query, source_ids, mode)
         with sqlite3.connect(str(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT result, created_at FROM answer_cache WHERE cache_key = ?", (cache_key,)
@@ -94,9 +104,15 @@ class QueryCache:
         except Exception:
             return None
 
-    def set_answer(self, query: str, source_ids: list[str], result: dict) -> None:
+    def set_answer(
+        self,
+        query: str,
+        source_ids: list[str],
+        result: dict,
+        mode: str = "concise",
+    ) -> None:
         """设置最终回答缓存。"""
-        cache_key = text_hash(f"{query.strip().lower()}|{'|'.join(sorted(source_ids))}")
+        cache_key = self._answer_key(query, source_ids, mode)
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO answer_cache(cache_key, query, result, created_at) VALUES (?,?,?,?)",
@@ -121,6 +137,19 @@ class QueryCache:
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute("DELETE FROM answer_cache WHERE cache_key = ?", (key,))
             conn.commit()
+
+    @staticmethod
+    def _normalize_options(options: Optional[dict[str, Any]]) -> str:
+        if not options:
+            return ""
+        return json.dumps(options, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _retrieval_key(self, query: str, options: Optional[dict[str, Any]]) -> str:
+        return text_hash(f"{query.strip().lower()}|{self._normalize_options(options)}")
+
+    def _answer_key(self, query: str, source_ids: list[str], mode: str) -> str:
+        suffix = "|".join(sorted(source_ids))
+        return text_hash(f"{query.strip().lower()}|{mode}|{suffix}")
 
 
 _cache_instance: QueryCache | None = None

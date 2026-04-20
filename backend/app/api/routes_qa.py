@@ -27,6 +27,14 @@ async def api_kb_qa(data: QARequest):
             mode=data.mode,
             top_k=data.top_k,
             top_n=data.top_n,
+            platform_filter=data.platform_filter,
+            model_filter=data.model_filter,
+            tag_filter=data.tag_filter,
+            date_from=data.date_from,
+            date_to=data.date_to,
+            retrieval_mode=data.retrieval_mode,
+            rerank_mode=data.rerank_mode,
+            rewrite_query_enabled=data.rewrite_query,
             include_debug=True,
         )
         return {
@@ -50,6 +58,14 @@ async def api_kb_qa_stream(data: QARequest):
                 mode=data.mode,
                 top_k=data.top_k,
                 top_n=data.top_n,
+                platform_filter=data.platform_filter,
+                model_filter=data.model_filter,
+                tag_filter=data.tag_filter,
+                date_from=data.date_from,
+                date_to=data.date_to,
+                retrieval_mode=data.retrieval_mode,
+                rerank_mode=data.rerank_mode,
+                rewrite_query_enabled=data.rewrite_query,
             ):
                 if "[SOURCES_JSON]" in piece:
                     _, sources_json = piece.split("[SOURCES_JSON]", 1)

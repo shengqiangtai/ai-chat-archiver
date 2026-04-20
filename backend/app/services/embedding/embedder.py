@@ -19,6 +19,7 @@ import gc
 import logging
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from app.core.config import EMBEDDING_MODEL
@@ -47,11 +48,13 @@ class Embedder:
     """Embedding 模型封装，单例模式。"""
 
     _instance: Embedder | None = None
+    _instance_lock = Lock()
 
     def __init__(self) -> None:
         from sentence_transformers import SentenceTransformer
 
         self.device = detect_device()
+        self._infer_lock = Lock()
         is_local = Path(EMBEDDING_MODEL).exists()
         logger.info("加载 Embedding 模型: %s (device=%s, local=%s)", EMBEDDING_MODEL, self.device, is_local)
 
@@ -82,7 +85,9 @@ class Embedder:
     def get(cls) -> Embedder:
         """单例获取。"""
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     def _to_list(self, vecs: Any) -> list[list[float]]:
@@ -98,19 +103,20 @@ class Embedder:
         if not texts:
             return []
         all_vecs = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            vecs = self.model.encode(
-                batch,
-                batch_size=batch_size,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-            )
-            all_vecs.extend(self._to_list(vecs))
-            # 每批次后释放 MPS 缓存
-            if self.device == "mps":
-                _flush_mps()
+        with self._infer_lock:
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                vecs = self.model.encode(
+                    batch,
+                    batch_size=batch_size,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                    convert_to_numpy=True,
+                )
+                all_vecs.extend(self._to_list(vecs))
+                # 每批次后释放 MPS 缓存
+                if self.device == "mps":
+                    _flush_mps()
         return all_vecs
 
     def encode_query(self, query: str) -> list[float]:
@@ -119,19 +125,21 @@ class Embedder:
         自动拼接 QUERY_INSTRUCTION 前缀后再编码。
         """
         text = QUERY_INSTRUCTION + (query or "")
-        vector = self.model.encode(
-            [text],
-            batch_size=1,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
+        with self._infer_lock:
+            vector = self.model.encode(
+                [text],
+                batch_size=1,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
         rows = self._to_list(vector)
         return rows[0] if rows else []
 
     def get_dimension(self) -> int:
         """返回嵌入向量维度。"""
-        dummy = self.model.encode(["test"], normalize_embeddings=True, convert_to_numpy=True)
+        with self._infer_lock:
+            dummy = self.model.encode(["test"], normalize_embeddings=True, convert_to_numpy=True)
         return len(dummy[0]) if len(dummy) > 0 else 0
 
 

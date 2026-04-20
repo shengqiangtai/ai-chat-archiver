@@ -107,12 +107,30 @@ export default function ReindexPanel() {
           <div className="space-y-1 text-sm text-[#9ca3af]">
             <div>总聊天数: <span className="text-[#e5e7eb] font-medium">{kbStatus.total_chats}</span></div>
             <div>总 Chunk 数: <span className="text-[#e5e7eb] font-medium">{kbStatus.total_chunks}</span></div>
+            <div>总实体数: <span className="text-[#e5e7eb] font-medium">{kbStatus.total_entities}</span></div>
             <div>向量库大小: <span className="text-[#e5e7eb] font-medium">{Math.round(kbStatus.vectorstore_size_bytes / 1024)} KB</span></div>
             <div>最后索引: <span className="text-[#e5e7eb]">{kbStatus.last_index_time || '未执行'}</span></div>
             <div>状态: <span className={kbStatus.is_indexing ? 'text-[#f59e0b]' : 'text-[#22c55e]'}>{kbStatus.is_indexing ? '索引进行中' : '空闲'}</span></div>
           </div>
         ) : (
           <div className="text-sm text-[#6b7280]">加载中...</div>
+        )}
+
+        {kbStatus && kbStatus.top_entities.length > 0 && (
+          <div className="bg-[#0f172a] border border-[#374151] rounded-lg p-3">
+            <div className="text-xs text-[#9ca3af] mb-2">高频实体</div>
+            <div className="flex flex-wrap gap-2">
+              {kbStatus.top_entities.map((entity) => (
+                <div
+                  key={`${entity.entity_type}-${entity.name}`}
+                  className="px-2 py-1 rounded-md bg-[#111827] border border-[#334155] text-xs text-[#cbd5e1]"
+                >
+                  {entity.name}
+                  <span className="text-[#64748b]"> · {entity.mention_count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         <div className="flex gap-2 flex-wrap">

@@ -76,6 +76,9 @@ class Chunk:
     created_at: str
     url: Optional[str] = None
     tags: list[str] = field(default_factory=list)
+    model_name: Optional[str] = None
+    turn_index: int = 0
+    chunk_index: int = 0
     text_hash: str = ""
 
 
@@ -95,6 +98,28 @@ class RetrievalHit:
     path: str
     created_at: str
     url: Optional[str] = None
+    keyword_score: Optional[float] = None
+    fused_score: Optional[float] = None
+    entity_score: Optional[float] = None
+    role_summary: str = ""
+    message_range: str = ""
+    model_name: Optional[str] = None
+    tags: list[str] = field(default_factory=list)
+    entity_names: list[str] = field(default_factory=list)
+    turn_index: int = 0
+    chunk_index: int = 0
+
+
+@dataclass
+class EntityMention:
+    entity_id: str
+    name: str
+    norm_name: str
+    entity_type: str
+    chunk_id: str
+    doc_id: str
+    turn_index: int
+    mention_text: str
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -105,7 +130,15 @@ class KbSearchRequest(BaseModel):
     query: str
     top_k: int = 10
     platform_filter: Optional[str] = None
+    model_filter: Optional[str] = None
+    tag_filter: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    retrieval_mode: str = "hybrid"
+    rerank_mode: str = "auto"
     score_threshold: float = 0.30
+    rewrite_query: bool = True
+    include_debug: bool = False
 
 
 class KbSearchResponse(BaseModel):
@@ -119,6 +152,14 @@ class QARequest(BaseModel):
     mode: str = "concise"
     top_k: int = 15
     top_n: int = 5
+    platform_filter: Optional[str] = None
+    model_filter: Optional[str] = None
+    tag_filter: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    retrieval_mode: str = "hybrid"
+    rerank_mode: str = "auto"
+    rewrite_query: bool = True
 
 
 class QAResponse(BaseModel):
@@ -140,6 +181,7 @@ class OllamaModelUpdateRequest(BaseModel):
 @dataclass
 class SourceRef:
     source_id: str
+    chunk_id: str
     platform: str
     title: str
     path: str
@@ -147,6 +189,8 @@ class SourceRef:
     rerank_score: Optional[float] = None
     url: Optional[str] = None
     excerpt: str = ""
+    message_range: str = ""
+    turn_index: int = 0
 
 
 @dataclass

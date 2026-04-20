@@ -133,6 +133,11 @@ CHUNK_MIN_MERGE = int(os.getenv("CHUNK_MIN_MERGE", "80" if _LOW_MEM else "100"))
 # 低内存：top_k 10→减少 embedding 次数；rerank_top_n 4→减少 reranker 压力
 RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "10" if _LOW_MEM else "15"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "4" if _LOW_MEM else "6"))
+DEFAULT_RERANK_MODE = str(os.getenv("RERANK_MODE", "auto")).strip().lower() or "auto"
+if DEFAULT_RERANK_MODE not in {"auto", "off", "on"}:
+    DEFAULT_RERANK_MODE = "auto"
+RERANK_CANDIDATE_LIMIT = int(os.getenv("RERANK_CANDIDATE_LIMIT", "4" if _LOW_MEM else "6"))
+RERANK_TIMEOUT_MS = int(os.getenv("RERANK_TIMEOUT_MS", "8000" if _LOW_MEM else "12000"))
 RETRIEVAL_SCORE_THRESHOLD = float(os.getenv("RETRIEVAL_SCORE_THRESHOLD", "0.30"))
 # 低内存：缩短 context 窗口，减少 tokenize 开销
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "2000" if _LOW_MEM else "2800"))

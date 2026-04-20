@@ -120,6 +120,9 @@ def _split_long_chunks(raw_chunks: list[_RawChunk], doc: Document) -> list[Chunk
                 created_at=doc.created_at,
                 url=doc.url,
                 tags=doc.tags[:],
+                model_name=doc.model_name,
+                turn_index=rc.turn_index,
+                chunk_index=idx,
                 text_hash=text_hash(full_text),
             ))
             idx += 1

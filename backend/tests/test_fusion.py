@@ -8,7 +8,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.models.schemas import RetrievalHit
-from app.services.retrieval.fusion import fuse_candidates
+from app.services.retrieval.fusion import GRAPH_SCORE_CAP, _graph_contribution, fuse_candidates
 
 
 def _hit(
@@ -60,8 +60,17 @@ def test_graph_entity_relative_strength_survives_capping() -> None:
     hits = fuse_candidates(
         dense_hits=[],
         keyword_hits=[],
-        entity_hits=[_hit("chunk-b", entity_score=0.80), _hit("chunk-c", entity_score=0.20)],
+        entity_hits=[_hit("chunk-b", entity_score=5.0), _hit("chunk-c", entity_score=2.0)],
         retrieval_mode="mix",
     )
 
-    assert hits[0].fused_score > hits[1].fused_score
+    assert [hit.chunk_id for hit in hits] == ["chunk-b", "chunk-c"]
+
+
+def test_graph_contribution_caps_without_flattening_integer_like_scores() -> None:
+    low = _graph_contribution(2.0)
+    high = _graph_contribution(5.0)
+
+    assert low < high
+    assert high <= GRAPH_SCORE_CAP
+    assert _graph_contribution(100.0) <= GRAPH_SCORE_CAP

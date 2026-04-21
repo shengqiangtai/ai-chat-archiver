@@ -83,8 +83,8 @@ def _add_score(current: Optional[float], increment: float) -> float:
 
 
 def _graph_contribution(entity_score: float) -> float:
-    bounded = max(0.0, min(float(entity_score), 1.0))
-    return bounded * GRAPH_SCORE_CAP
+    bounded = max(0.0, float(entity_score))
+    return GRAPH_SCORE_CAP * (bounded / (bounded + 1.0)) if bounded else 0.0
 
 
 def _normalize_scores(hits: List[RetrievalHit], attr: str) -> List[RetrievalHit]:

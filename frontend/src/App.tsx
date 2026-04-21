@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy, useState, useEffect, useCallback } from 'react'
 import { api } from './api/client'
-import KnowledgeBaseQA from './pages/KnowledgeBaseQA'
-import DocumentDetail from './pages/DocumentDetail'
 import type { ChatItem } from './types'
 
 type MainTab = 'chats' | 'kb'
+
+const KnowledgeBaseQA = lazy(() => import('./pages/KnowledgeBaseQA'))
+const DocumentDetail = lazy(() => import('./pages/DocumentDetail'))
 
 export default function App() {
   const [tab, setTab] = useState<MainTab>('chats')
@@ -173,13 +174,19 @@ export default function App() {
             </div>
 
             {/* 详情 */}
-            <DocumentDetail chatId={selectedId} onDelete={handleRefresh} />
+            <Suspense fallback={<PanelFallback label="加载详情中..." />}>
+              <DocumentDetail chatId={selectedId} onDelete={handleRefresh} />
+            </Suspense>
           </div>
         </>
       )}
 
       {/* 知识库页 */}
-      {tab === 'kb' && <KnowledgeBaseQA />}
+      {tab === 'kb' && (
+        <Suspense fallback={<PanelFallback label="加载知识库中..." />}>
+          <KnowledgeBaseQA />
+        </Suspense>
+      )}
     </div>
   )
 }
@@ -198,4 +205,12 @@ function formatDate(value: string) {
   const d = new Date(value)
   if (isNaN(d.getTime())) return value
   return d.toLocaleString()
+}
+
+function PanelFallback({ label }: { label: string }) {
+  return (
+    <div className="bg-[#111827] border border-[#374151] rounded-xl min-h-[280px] flex items-center justify-center text-sm text-[#94a3b8]">
+      {label}
+    </div>
+  )
 }

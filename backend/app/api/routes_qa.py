@@ -34,6 +34,7 @@ async def api_kb_qa(data: QARequest):
             date_to=data.date_to,
             retrieval_mode=data.retrieval_mode,
             rerank_mode=data.rerank_mode,
+            graph_mode=data.graph_mode,
             rewrite_query_enabled=data.rewrite_query,
             include_debug=True,
         )
@@ -65,6 +66,7 @@ async def api_kb_qa_stream(data: QARequest):
                 date_to=data.date_to,
                 retrieval_mode=data.retrieval_mode,
                 rerank_mode=data.rerank_mode,
+                graph_mode=data.graph_mode,
                 rewrite_query_enabled=data.rewrite_query,
             ):
                 if "[SOURCES_JSON]" in piece:

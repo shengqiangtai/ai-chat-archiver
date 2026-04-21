@@ -30,29 +30,40 @@ AI Chat Archiver 是一个本地优先的 AI 对话归档与 RAG 系统，当前
 
 ### 3. Retrieval
 
+- `backend/app/services/retrieval/query_analysis.py` 会先对查询做轻量分类，决定：
+  - 是否适合 graph/entity 增强
+  - 是否适合 rerank
+  - 当前查询更接近 symbolic、relation、follow-up 还是普通 semantic
 - `backend/app/services/qa/query_rewrite.py` 会在提问含有“上次 / 之前 / 那个”等指代时，先做独立查询改写。
 - `backend/app/services/vectorstore/retrieval.py` 提供五种检索模式：
   - `vector`：纯向量检索。
   - `keyword`：纯 FTS 检索。
   - `hybrid`：向量检索 + FTS 双路召回，再用 RRF 融合。
   - `entity`：基于实体索引和共现边扩展后的实体检索。
-  - `mix`：向量检索 + FTS + entity 三路融合。
+  - `mix`：向量检索 + FTS + entity/graph 三路融合。
+- `backend/app/services/graph/retrieval.py` 会在 query analysis 允许时，基于 `kb_graph_relations` 生成轻量 graph-assisted candidates。
+- graph 路径默认走 `graph_mode=auto`，可以在 benchmark 里用 `graph_mode=off` 做 baseline 对比。
 - 召回后可选 cross-encoder rerank。
 - QA 模式下会根据命中的 `turn_index` 自动扩展相邻轮次，减少片段化上下文。
 - 检索结果会进入 SQLite 查询缓存。
+- debug 输出会显式带出 `query_analysis`、`graph_routed`、`graph_hit_count`、`rerank_effective_mode` 等可解释字段。
 
 ### 4. QA
 
 - `backend/app/services/qa/pipeline.py` 编排：
   - hybrid retrieval
+  - graph-gated retrieval augmentation
   - rerank
   - neighbor turn expansion
   - prompt construction
   - local LLM generation
   - citation parsing
+  - grounding checks
+  - conservative downgrade when support is weak
   - answer cache
 - `backend/app/services/llm/generator.py` 支持 LM Studio / Ollama / transformers。
 - `backend/app/services/qa/citation.py` 对回答做引用解析，并校验引用编号是否与检索片段一致。
+- `backend/app/services/qa/grounding.py` 对回答做轻量支撑检查；当回答和来源片段重叠不足时，QA 会降级成保守的 retrieval summary。
 
 ## Storage Layout
 

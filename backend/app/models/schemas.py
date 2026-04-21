@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+ScoreValue = Optional[float]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -23,8 +25,8 @@ class SaveRequest(BaseModel):
     model: Optional[str] = None
     title: str
     url: Optional[str] = None
-    tags: list[str] = Field(default_factory=list)
-    messages: list[Message] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    messages: List[Message] = Field(default_factory=list)
 
 
 class SearchRequest(BaseModel):
@@ -91,23 +93,32 @@ class RetrievalHit:
     chunk_id: str
     doc_id: str
     score: float
-    rerank_score: Optional[float]
+    rerank_score: ScoreValue
     platform: str
     title: str
     excerpt: str
     path: str
     created_at: str
     url: Optional[str] = None
-    keyword_score: Optional[float] = None
-    fused_score: Optional[float] = None
-    entity_score: Optional[float] = None
+    keyword_score: ScoreValue = None
+    fused_score: ScoreValue = None
+    entity_score: ScoreValue = None
     role_summary: str = ""
     message_range: str = ""
     model_name: Optional[str] = None
-    tags: list[str] = field(default_factory=list)
-    entity_names: list[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    entity_names: List[str] = field(default_factory=list)
     turn_index: int = 0
     chunk_index: int = 0
+
+
+@dataclass
+class QueryAnalysis:
+    query_type: str
+    enable_rewrite: bool
+    enable_rerank: bool
+    enable_graph: bool
+    reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -134,17 +145,30 @@ class KbSearchRequest(BaseModel):
     tag_filter: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    retrieval_mode: str = "hybrid"
+    retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
+    graph_mode: str = "auto"
     score_threshold: float = 0.30
     rewrite_query: bool = True
     include_debug: bool = False
 
 
+class RetrievalDebug(BaseModel):
+    query_analysis: Optional[QueryAnalysis] = None
+    analysis_scope: Optional[str] = None
+    graph_routed: bool = False
+    graph_hit_count: int = 0
+    graph_hits: List[Dict[str, Any]] = Field(default_factory=list)
+    grounding: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class KbSearchResponse(BaseModel):
     query: str
-    hits: list[dict] = Field(default_factory=list)
+    hits: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = 0
+    debug: Optional[RetrievalDebug] = None
 
 
 class QARequest(BaseModel):
@@ -157,17 +181,18 @@ class QARequest(BaseModel):
     tag_filter: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    retrieval_mode: str = "hybrid"
+    retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
+    graph_mode: str = "auto"
     rewrite_query: bool = True
 
 
 class QAResponse(BaseModel):
     answer: str
-    citations: list[dict] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
     uncertainty: Optional[str] = None
-    sources: list[dict] = Field(default_factory=list)
-    debug: Optional[dict] = None
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    debug: Optional[RetrievalDebug] = None
 
 
 class OllamaModelUpdateRequest(BaseModel):
@@ -186,7 +211,7 @@ class SourceRef:
     title: str
     path: str
     score: float
-    rerank_score: Optional[float] = None
+    rerank_score: ScoreValue = None
     url: Optional[str] = None
     excerpt: str = ""
     message_range: str = ""
@@ -202,7 +227,7 @@ class Citation:
 @dataclass
 class AnswerResult:
     answer: str
-    citations: list[Citation]
+    citations: List[Citation]
     uncertainty: Optional[str]
-    sources: list[SourceRef]
-    debug: dict[str, Any] = field(default_factory=dict)
+    sources: List[SourceRef]
+    debug: Dict[str, Any] = field(default_factory=dict)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/kb", tags=["knowledge-base-search"])
 
 
 @router.post("/search")
-async def api_kb_search(data: KbSearchRequest):
+async def api_kb_search(data: KbSearchRequest) -> dict[str, Any]:
     """
     语义检索（不调用 LLM）。
     返回 top_k 个最相关的 chunk。
@@ -42,6 +43,7 @@ async def api_kb_search(data: KbSearchRequest):
                 neighbor_turn_window=1,
                 use_cache=True,
                 rerank_mode=data.rerank_mode,
+                graph_mode=data.graph_mode,
             )
             return {
                 "query": data.query,
@@ -76,6 +78,7 @@ async def api_kb_search(data: KbSearchRequest):
             neighbor_turn_window=1,
             use_cache=True,
             rerank_mode=data.rerank_mode,
+            graph_mode=data.graph_mode,
         )
         return {
             "query": data.query,

@@ -1,4 +1,5 @@
 export type RerankMode = 'auto' | 'off' | 'on'
+export type GraphMode = 'auto' | 'off'
 
 export interface RetrievalHit {
   chunk_id: string
@@ -21,6 +22,22 @@ export interface RetrievalHit {
   entity_names?: string[]
   turn_index?: number
   chunk_index?: number
+}
+
+export interface QueryAnalysis {
+  query_type: string
+  enable_rewrite: boolean
+  enable_rerank: boolean
+  enable_graph: boolean
+  reasons: string[]
+}
+
+export interface GroundingDebug {
+  supported: boolean
+  should_downgrade: boolean
+  support_rate: number
+  message: string
+  unsupported_claims?: string[]
 }
 
 export interface Citation {
@@ -48,6 +65,9 @@ export interface RetrievalDebug {
   dense_count: number | null
   keyword_count: number | null
   entity_count: number | null
+  graph_routed: boolean
+  graph_hit_count: number
+  graph_hits: RetrievalHit[]
   candidate_count: number
   final_count: number
   embed_time?: number
@@ -59,8 +79,12 @@ export interface RetrievalDebug {
   rewrite_strategy?: string
   rerank_requested_mode?: RerankMode
   rerank_effective_mode?: RerankMode | 'off'
+  graph_requested_mode?: GraphMode
+  graph_effective_mode?: 'off' | 'on'
   rerank_applied?: boolean
+  rerank_status?: 'skipped' | 'applied' | 'fallback'
   rerank_reason?: string
+  rerank_message?: string
   rerank_fallback?: boolean
   rerank_timed_out?: boolean
   rerank_elapsed_ms?: number
@@ -68,6 +92,9 @@ export interface RetrievalDebug {
   rerank_candidate_count?: number
   query_entities?: string[]
   expanded_entities?: string[]
+  query_analysis?: QueryAnalysis
+  analysis_scope?: string
+  grounding?: GroundingDebug
   dense_hits: RetrievalHit[]
   keyword_hits: RetrievalHit[]
   entity_hits: RetrievalHit[]
@@ -90,7 +117,7 @@ export interface QAResponse {
   citations: Citation[]
   uncertainty: string | null
   sources: SourceRef[]
-  debug?: Record<string, unknown>
+  debug?: RetrievalDebug
 }
 
 export interface KbStatus {
@@ -114,11 +141,29 @@ export interface OllamaStatus {
 export interface IndexProgress {
   task_id: string
   status: 'pending' | 'running' | 'done' | 'error'
+  scanned_files?: number
   total_files: number
   processed_files: number
+  skipped_files?: number
+  skip_reasons?: Record<string, number>
   total_chunks: number
   elapsed_seconds: number
   error: string | null
+}
+
+export interface CleanupResult {
+  ok: boolean
+  message: string
+  orphan_chat_count: number
+  stale_file_record_count: number
+  orphan_doc_count: number
+  removed_chats: number
+  removed_file_records: number
+  removed_vector_docs: number
+  removed_chunks: number
+  removed_chunk_hash_docs: number
+  sample_orphan_chat_ids: string[]
+  sample_orphan_doc_ids: string[]
 }
 
 export interface ChatItem {

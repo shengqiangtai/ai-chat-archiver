@@ -6,13 +6,21 @@ import json
 import logging
 import shutil
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app.core.config import DB_PATH, STORAGE_ROOT
+from app.core.config import (
+    DB_PATH,
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLITE_WRITE_RETRY_ATTEMPTS,
+    SQLITE_WRITE_RETRY_BACKOFF_MS,
+    STORAGE_ROOT,
+)
 from app.models.schemas import Chunk, EntityMention, SaveRequest
+from app.utils.hashing import text_hash
 
 logger = logging.getLogger("archiver.db")
 
@@ -65,6 +73,10 @@ def _messages_text(messages: list[dict]) -> str:
     )
 
 
+def _graph_norm(name: str) -> str:
+    return " ".join((name or "").strip().lower().split())
+
+
 class Database:
     """封装 SQLite 操作，支持聊天记录 CRUD + 文件状态追踪。"""
 
@@ -74,12 +86,45 @@ class Database:
         self._init_tables()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(
+            str(self.db_path),
+            timeout=max(SQLITE_BUSY_TIMEOUT_MS, 1) / 1000.0,
+        )
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout = {max(SQLITE_BUSY_TIMEOUT_MS, 1)}")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
+    @staticmethod
+    def _is_lock_error(err: sqlite3.OperationalError) -> bool:
+        msg = str(err).lower()
+        return "database is locked" in msg or "database table is locked" in msg or "database is busy" in msg
+
+    def _write_with_retry(self, op_name: str, fn):
+        attempts = max(1, SQLITE_WRITE_RETRY_ATTEMPTS)
+        for attempt in range(1, attempts + 1):
+            try:
+                with self._conn() as conn:
+                    result = fn(conn)
+                    conn.commit()
+                    return result
+            except sqlite3.OperationalError as err:
+                if not self._is_lock_error(err) or attempt >= attempts:
+                    raise
+                sleep_s = max(SQLITE_WRITE_RETRY_BACKOFF_MS, 1) * attempt / 1000.0
+                logger.warning(
+                    "SQLite 写入繁忙，准备重试: op=%s, attempt=%d/%d, sleep=%.2fs, error=%s",
+                    op_name,
+                    attempt,
+                    attempts,
+                    sleep_s,
+                    err,
+                )
+                time.sleep(sleep_s)
+
     def _init_tables(self) -> None:
-        with self._conn() as conn:
+        def _create(conn: sqlite3.Connection) -> None:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS chats (
                     id TEXT PRIMARY KEY,
@@ -171,7 +216,48 @@ class Database:
                     PRIMARY KEY (src_entity_id, dst_entity_id, cooccur_scope)
                 )
             """)
-            conn.commit()
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS kb_graph_relations (
+                    relation_id TEXT PRIMARY KEY,
+                    chunk_id TEXT NOT NULL,
+                    source_entity TEXT NOT NULL,
+                    source_norm_name TEXT NOT NULL,
+                    target_entity TEXT NOT NULL,
+                    target_norm_name TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    confidence REAL DEFAULT 1.0,
+                    created_at TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_entity_mentions_doc_id
+                ON kb_entity_mentions(doc_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_entity_mentions_chunk_id
+                ON kb_entity_mentions(chunk_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_entity_edges_src
+                ON kb_entity_edges(src_entity_id, cooccur_scope)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_entity_edges_dst
+                ON kb_entity_edges(dst_entity_id, cooccur_scope)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_graph_relations_chunk
+                ON kb_graph_relations(chunk_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_graph_relations_source
+                ON kb_graph_relations(source_norm_name, relation_type)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_graph_relations_target
+                ON kb_graph_relations(target_norm_name, relation_type)
+            """)
+        self._write_with_retry("init_tables", _create)
 
     def save_chat(self, data: SaveRequest) -> dict:
         if not data.messages:
@@ -182,7 +268,7 @@ class Database:
         tags = [t.strip() for t in data.tags if t and t.strip()]
         messages = [m.model_dump() for m in data.messages]
 
-        with self._conn() as conn:
+        def _save(conn: sqlite3.Connection) -> tuple[str, str]:
             existing = None
             if data.url:
                 existing = conn.execute(
@@ -243,9 +329,11 @@ class Database:
                 (chat_id, data.platform, data.model or "", title, content_text,
                  tags_csv, data.url or "", created_at, now, str(chat_dir)),
             )
-            conn.commit()
+            return str(chat_dir), chat_id
 
-        return {"ok": True, "path": str(chat_dir), "id": chat_id}
+        saved_path, saved_chat_id = self._write_with_retry("save_chat", _save)
+
+        return {"ok": True, "path": saved_path, "id": saved_chat_id}
 
     def _generate_chat_dir(self, platform: str, created_at: str, title: str, chat_id: str) -> Path:
         try:
@@ -343,17 +431,42 @@ class Database:
         return {"id": item["id"], "meta": meta, "content": content}
 
     def delete_chat(self, chat_id: str) -> bool:
-        with self._conn() as conn:
+        def _delete(conn: sqlite3.Connection) -> str | None:
             row = conn.execute("SELECT file_path FROM chats WHERE id = ?", (chat_id,)).fetchone()
             if not row:
-                return False
-            file_path = row["file_path"]
+                return None
+            file_path = str(row["file_path"] or "")
             conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
             conn.execute("DELETE FROM chats_fts WHERE id = ?", (chat_id,))
-            conn.commit()
+            return file_path
+        file_path = self._write_with_retry("delete_chat", _delete)
+        if file_path is None:
+            return False
         if file_path:
             shutil.rmtree(file_path, ignore_errors=True)
         return True
+
+    def list_orphan_chats(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, title, file_path FROM chats ORDER BY saved_at DESC"
+            ).fetchall()
+        results: list[dict] = []
+        for row in rows:
+            file_path = str(row["file_path"] or "")
+            if file_path and not Path(file_path).exists():
+                results.append(dict(row))
+        return results
+
+    def purge_chat_metadata(self, chat_id: str) -> bool:
+        def _purge(conn: sqlite3.Connection) -> bool:
+            row = conn.execute("SELECT 1 FROM chats WHERE id = ?", (chat_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+            conn.execute("DELETE FROM chats_fts WHERE id = ?", (chat_id,))
+            return True
+        return bool(self._write_with_retry("purge_chat_metadata", _purge))
 
     def get_stats(self) -> dict:
         with self._conn() as conn:
@@ -374,23 +487,33 @@ class Database:
     def upsert_file_record(self, file_path: str, file_hash: str, modified_time: float,
                            doc_id: str, chunk_count: int) -> None:
         now = _now_iso()
-        with self._conn() as conn:
+        def _upsert(conn: sqlite3.Connection) -> None:
             conn.execute(
                 """INSERT OR REPLACE INTO file_index(file_path, file_hash, modified_time,
                    doc_id, chunk_count, indexed_at) VALUES (?,?,?,?,?,?)""",
                 (file_path, file_hash, modified_time, doc_id, chunk_count, now),
             )
-            conn.commit()
+        self._write_with_retry("upsert_file_record", _upsert)
 
     def delete_file_record(self, file_path: str) -> None:
-        with self._conn() as conn:
+        def _delete(conn: sqlite3.Connection) -> None:
             conn.execute("DELETE FROM file_index WHERE file_path = ?", (file_path,))
-            conn.commit()
+        self._write_with_retry("delete_file_record", _delete)
 
     def get_all_file_records(self) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM file_index").fetchall()
         return [dict(r) for r in rows]
+
+    def list_stale_file_records(self) -> list[dict]:
+        rows = self.get_all_file_records()
+        return [row for row in rows if not Path(str(row.get("file_path") or "")).exists()]
+
+    def delete_file_records_by_doc(self, doc_id: str) -> int:
+        def _delete(conn: sqlite3.Connection) -> int:
+            cursor = conn.execute("DELETE FROM file_index WHERE doc_id = ?", (doc_id,))
+            return int(cursor.rowcount or 0)
+        return int(self._write_with_retry("delete_file_records_by_doc", _delete) or 0)
 
     # ── chunk 去重 ─────────────────────────────────────────────────────
     def has_chunk_hash(self, text_hash: str) -> bool:
@@ -399,33 +522,39 @@ class Database:
         return row is not None
 
     def add_chunk_hash(self, text_hash: str, chunk_id: str, doc_id: str) -> None:
-        with self._conn() as conn:
+        def _add(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "INSERT OR REPLACE INTO chunk_hashes(text_hash, chunk_id, doc_id) VALUES (?,?,?)",
                 (text_hash, chunk_id, doc_id),
             )
-            conn.commit()
+        self._write_with_retry("add_chunk_hash", _add)
 
     def delete_chunk_hashes_by_doc(self, doc_id: str) -> None:
-        with self._conn() as conn:
+        def _delete(conn: sqlite3.Connection) -> None:
             conn.execute("DELETE FROM chunk_hashes WHERE doc_id = ?", (doc_id,))
-            conn.commit()
+        self._write_with_retry("delete_chunk_hashes_by_doc", _delete)
+
+    def list_chunk_hash_docs(self) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT DISTINCT doc_id FROM chunk_hashes").fetchall()
+        return [str(row["doc_id"]) for row in rows if row["doc_id"]]
 
     # ── 知识库 chunk 全文索引 ───────────────────────────────────────────
     def clear_kb_chunks(self) -> None:
-        with self._conn() as conn:
+        def _clear(conn: sqlite3.Connection) -> None:
             conn.execute("DELETE FROM kb_chunks")
             conn.execute("DELETE FROM kb_chunks_fts")
             conn.execute("DELETE FROM kb_entities")
             conn.execute("DELETE FROM kb_entity_mentions")
             conn.execute("DELETE FROM kb_entity_edges")
-            conn.commit()
+            conn.execute("DELETE FROM kb_graph_relations")
+        self._write_with_retry("clear_kb_chunks", _clear)
 
     def upsert_kb_chunks(self, chunks: list[Chunk]) -> int:
         if not chunks:
             return 0
 
-        with self._conn() as conn:
+        def _upsert(conn: sqlite3.Connection) -> int:
             for chunk in chunks:
                 tags_csv = ",".join(chunk.tags)
                 conn.execute(
@@ -471,12 +600,12 @@ class Database:
                         chunk.model_name or "",
                     ),
                 )
-            conn.commit()
+            return len(chunks)
 
-        return len(chunks)
+        return int(self._write_with_retry("upsert_kb_chunks", _upsert) or 0)
 
     def delete_kb_chunks_by_doc(self, doc_id: str) -> int:
-        with self._conn() as conn:
+        def _delete(conn: sqlite3.Connection) -> int:
             rows = conn.execute(
                 "SELECT chunk_id FROM kb_chunks WHERE doc_id = ?",
                 (doc_id,),
@@ -504,15 +633,34 @@ class Database:
                        WHERE m.entity_id = kb_entities.entity_id
                    )"""
             )
+            conn.execute(
+                "DELETE FROM kb_graph_relations WHERE chunk_id IN (%s)"
+                % ",".join("?" for _ in chunk_ids),
+                chunk_ids,
+            )
             self._rebuild_entity_edges(conn)
-            conn.commit()
-        return len(chunk_ids)
+            return len(chunk_ids)
+        return int(self._write_with_retry("delete_kb_chunks_by_doc", _delete) or 0)
+
+    def list_kb_doc_sources(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT doc_id, MIN(source_path) AS source_path, COUNT(*) AS chunk_count
+                   FROM kb_chunks
+                   GROUP BY doc_id"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_chat_ids(self) -> set[str]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id FROM chats").fetchall()
+        return {str(row["id"]) for row in rows if row["id"]}
 
     def upsert_entity_mentions(self, mentions: list[EntityMention], created_at: str = "") -> int:
         if not mentions:
             return 0
 
-        with self._conn() as conn:
+        def _upsert(conn: sqlite3.Connection) -> int:
             for mention in mentions:
                 conn.execute(
                     """INSERT INTO kb_entities(entity_id, name, norm_name, entity_type, mention_count, last_seen_at)
@@ -556,9 +704,46 @@ class Database:
                    )"""
             )
             self._rebuild_entity_edges(conn)
-            conn.commit()
+            return len(mentions)
 
-        return len(mentions)
+        return int(self._write_with_retry("upsert_entity_mentions", _upsert) or 0)
+
+    def upsert_graph_relations(self, relations: list[dict[str, str]], created_at: str = "") -> int:
+        if not relations:
+            return 0
+
+        def _upsert(conn: sqlite3.Connection) -> int:
+            for relation in relations:
+                chunk_id = str(relation.get("chunk_id") or "").strip()
+                source_entity = str(relation.get("source_entity") or "").strip()
+                target_entity = str(relation.get("target_entity") or "").strip()
+                relation_type = str(relation.get("relation_type") or "").strip()
+                if not chunk_id or not source_entity or not target_entity or not relation_type:
+                    continue
+
+                relation_id = text_hash(
+                    f"graph:{chunk_id}:{_graph_norm(source_entity)}:{_graph_norm(target_entity)}:{relation_type}"
+                )[:24]
+                conn.execute(
+                    """INSERT OR REPLACE INTO kb_graph_relations(
+                       relation_id, chunk_id, source_entity, source_norm_name,
+                       target_entity, target_norm_name, relation_type, confidence, created_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (
+                        relation_id,
+                        chunk_id,
+                        source_entity,
+                        _graph_norm(source_entity),
+                        target_entity,
+                        _graph_norm(target_entity),
+                        relation_type,
+                        float(relation.get("confidence") or 1.0),
+                        created_at,
+                    ),
+                )
+            return len(relations)
+
+        return int(self._write_with_retry("upsert_graph_relations", _upsert) or 0)
 
     def search_entities(self, names: list[str], limit: int = 8) -> list[dict]:
         if not names:

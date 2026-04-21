@@ -16,15 +16,73 @@ from app.core.config import (
     RETRIEVAL_TOP_K,
 )
 from app.db.sqlite import get_db
-from app.models.schemas import RetrievalHit
+from app.models.schemas import QueryAnalysis, RetrievalHit
+from app.services.graph.retrieval import retrieve_graph_candidates
+from app.services.retrieval.fusion import fuse_candidates
 from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
 from app.services.ingest.entity_extractor import extract_query_entities, normalize_entity_name
+from app.services.retrieval.query_analysis import analyze_query
 from app.services.vectorstore.chroma_store import get_store
 
 logger = logging.getLogger("archiver.retrieval")
 
-_RRF_K = 60.0
+
+def _rerank_reason_label(reason: str) -> str:
+    mapping = {
+        "disabled": "已关闭 rerank",
+        "no_candidates": "没有可精排的候选",
+        "candidate_limit_exceeded": "候选数超过阈值，已跳过 rerank",
+        "within_limit": "候选数在阈值内，准备执行 rerank",
+        "forced": "已强制执行 rerank",
+        "forced_clipped": "已强制执行 rerank，但只处理前几条候选",
+        "model_unavailable": "reranker 不可用，已回退到原始检索顺序",
+        "timeout": "rerank 超时，已回退到原始检索顺序",
+        "ok": "rerank 已执行",
+        "cache_hit": "命中缓存，未重新执行 rerank",
+    }
+    if reason.startswith("error:"):
+        return f"rerank 执行失败，已回退到原始检索顺序（{reason.split(':', 1)[1]}）"
+    return mapping.get(reason, reason or "未知原因")
+
+
+def _rerank_status(*, applied: bool, fallback: bool) -> str:
+    if applied:
+        return "applied"
+    if fallback:
+        return "fallback"
+    return "skipped"
+
+
+def _effective_rerank_mode(*, use_rerank: bool, requested_mode: str) -> str:
+    if not use_rerank:
+        return "off"
+    if requested_mode == "off":
+        return "off"
+    if requested_mode == "auto":
+        return "auto"
+    return "on"
+
+
+def _effective_graph_mode(*, requested_mode: str, query_analysis: QueryAnalysis) -> str:
+    if requested_mode == "off":
+        return "off"
+    return "on" if query_analysis.enable_graph else "off"
+
+
+def _query_analysis_debug(query_analysis: QueryAnalysis) -> dict[str, object]:
+    return {
+        "query_analysis": asdict(query_analysis),
+        "analysis_scope": "retrieval_query",
+    }
+
+
+def _graph_debug(*, graph_routed: bool, graph_hits: list[RetrievalHit]) -> dict[str, object]:
+    return {
+        "graph_routed": graph_routed,
+        "graph_hit_count": len(graph_hits),
+        "graph_hits": [asdict(hit) for hit in graph_hits[:5]],
+    }
 
 
 def retrieve(
@@ -38,11 +96,12 @@ def retrieve(
     date_to: Optional[str] = None,
     score_threshold: float = RETRIEVAL_SCORE_THRESHOLD,
     use_rerank: bool = True,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     expand_neighbors: bool = True,
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
     rerank_mode: str = DEFAULT_RERANK_MODE,
+    graph_mode: str = "auto",
     rerank_timeout_ms: int = RERANK_TIMEOUT_MS,
     rerank_candidate_limit: int = RERANK_CANDIDATE_LIMIT,
 ) -> list[RetrievalHit]:
@@ -62,6 +121,7 @@ def retrieve(
         neighbor_turn_window=neighbor_turn_window,
         use_cache=use_cache,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
         rerank_timeout_ms=rerank_timeout_ms,
         rerank_candidate_limit=rerank_candidate_limit,
         include_debug=False,
@@ -80,11 +140,12 @@ def retrieve_debug(
     date_to: Optional[str] = None,
     score_threshold: float = RETRIEVAL_SCORE_THRESHOLD,
     use_rerank: bool = True,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     expand_neighbors: bool = False,
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
     rerank_mode: str = DEFAULT_RERANK_MODE,
+    graph_mode: str = "auto",
     rerank_timeout_ms: int = RERANK_TIMEOUT_MS,
     rerank_candidate_limit: int = RERANK_CANDIDATE_LIMIT,
 ) -> dict:
@@ -104,6 +165,7 @@ def retrieve_debug(
         neighbor_turn_window=neighbor_turn_window,
         use_cache=use_cache,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
         rerank_timeout_ms=rerank_timeout_ms,
         rerank_candidate_limit=rerank_candidate_limit,
         include_debug=True,
@@ -131,6 +193,7 @@ def _retrieve_impl(
     neighbor_turn_window: int,
     use_cache: bool,
     rerank_mode: str,
+    graph_mode: str,
     rerank_timeout_ms: int,
     rerank_candidate_limit: int,
     include_debug: bool,
@@ -139,12 +202,26 @@ def _retrieve_impl(
     if not user_query:
         return [], {}
 
-    retrieval_mode = (retrieval_mode or "hybrid").strip().lower()
+    retrieval_mode = (retrieval_mode or "mix").strip().lower()
     if retrieval_mode not in {"hybrid", "vector", "keyword", "entity", "mix"}:
-        retrieval_mode = "hybrid"
+        retrieval_mode = "mix"
     requested_rerank_mode = (rerank_mode or DEFAULT_RERANK_MODE).strip().lower()
     if requested_rerank_mode not in {"auto", "off", "on"}:
         requested_rerank_mode = DEFAULT_RERANK_MODE
+    requested_graph_mode = (graph_mode or "auto").strip().lower()
+    if requested_graph_mode not in {"auto", "off"}:
+        requested_graph_mode = "auto"
+    query_analysis = analyze_query(user_query)
+    effective_use_rerank = use_rerank and query_analysis.enable_rerank
+    effective_graph_mode = _effective_graph_mode(
+        requested_mode=requested_graph_mode,
+        query_analysis=query_analysis,
+    )
+    effective_expand_neighbors = expand_neighbors
+    effective_rerank_mode = _effective_rerank_mode(
+        use_rerank=effective_use_rerank,
+        requested_mode=requested_rerank_mode,
+    )
 
     cache_options = {
         "top_k": top_k,
@@ -155,16 +232,19 @@ def _retrieve_impl(
         "date_from": date_from,
         "date_to": date_to,
         "score_threshold": score_threshold,
-        "use_rerank": use_rerank,
+        "use_rerank": effective_use_rerank,
         "retrieval_mode": retrieval_mode,
         "expand_neighbors": expand_neighbors,
         "neighbor_turn_window": neighbor_turn_window,
         "rerank_mode": requested_rerank_mode,
+        "graph_mode": effective_graph_mode,
         "rerank_timeout_ms": rerank_timeout_ms,
         "rerank_candidate_limit": rerank_candidate_limit,
     }
 
-    if use_cache:
+    allow_cache_read = use_cache and not (include_debug and effective_graph_mode == "on")
+
+    if allow_cache_read:
         cached = get_cache().get_retrieval(user_query, cache_options)
         if cached is not None:
             hits = [RetrievalHit(**item) for item in cached]
@@ -178,10 +258,14 @@ def _retrieve_impl(
                 "final_count": len(hits),
                 "query_entities": [],
                 "expanded_entities": [],
+                "graph_requested_mode": requested_graph_mode,
+                "graph_effective_mode": effective_graph_mode,
                 "rerank_requested_mode": requested_rerank_mode,
-                "rerank_effective_mode": requested_rerank_mode,
+                "rerank_effective_mode": effective_rerank_mode,
                 "rerank_applied": False,
+                "rerank_status": "skipped",
                 "rerank_reason": "cache_hit",
+                "rerank_message": _rerank_reason_label("cache_hit"),
                 "rerank_fallback": False,
                 "rerank_timed_out": False,
                 "rerank_elapsed_ms": 0,
@@ -192,6 +276,8 @@ def _retrieve_impl(
                 "entity_hits": [],
                 "candidate_hits": [],
                 "final_hits": [asdict(hit) for hit in hits],
+                **_graph_debug(graph_routed=False, graph_hits=[]),
+                **_query_analysis_debug(query_analysis),
             } if include_debug else {}
             logger.info("命中检索缓存: query=%r", user_query[:50])
             return hits, debug
@@ -200,6 +286,7 @@ def _retrieve_impl(
     dense_hits: list[RetrievalHit] = []
     keyword_hits: list[RetrievalHit] = []
     entity_hits: list[RetrievalHit] = []
+    graph_hits: list[RetrievalHit] = []
     query_entities: list[str] = []
     expanded_entities: list[str] = []
     t_embed = 0.0
@@ -214,6 +301,8 @@ def _retrieve_impl(
         "elapsed_ms": 0,
         "candidate_limit": max(1, rerank_candidate_limit),
         "candidate_count": 0,
+        "message": _rerank_reason_label("disabled"),
+        "status": "skipped",
     }
 
     if retrieval_mode in {"hybrid", "vector", "mix"}:
@@ -247,7 +336,7 @@ def _retrieve_impl(
         )
         keyword_hits = [_row_to_hit(row) for row in keyword_rows]
 
-    if retrieval_mode in {"entity", "mix"}:
+    if retrieval_mode in {"entity", "mix"} and effective_graph_mode == "on":
         query_entities = extract_query_entities(user_query)
         seed_entities = get_db().search_entities(query_entities, limit=max(4, top_k))
         expanded_entities = [normalize_entity_name(str(item.get("norm_name") or "")) for item in seed_entities]
@@ -270,14 +359,24 @@ def _retrieve_impl(
             limit=max(top_k, RETRIEVAL_TOP_K),
         )
         entity_hits = [_row_to_hit(row) for row in entity_rows]
+        graph_hits = retrieve_graph_candidates(
+            user_query,
+            top_k=max(top_k, RETRIEVAL_TOP_K),
+            platform_filter=platform_filter,
+            model_filter=model_filter,
+            tag_filter=tag_filter,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        entity_hits.extend(graph_hits)
 
     t_search = time.time() - t0 - t_embed
-    candidates = _merge_candidates(dense_hits, keyword_hits, entity_hits, retrieval_mode)
+    candidates = fuse_candidates(dense_hits, keyword_hits, entity_hits, retrieval_mode)
     candidate_snapshot = [asdict(hit) for hit in candidates[:8]] if include_debug else []
     rerank_info["candidate_count"] = len(candidates)
 
     rerank_plan = _plan_rerank(
-        use_rerank=use_rerank,
+        use_rerank=effective_use_rerank,
         requested_mode=requested_rerank_mode,
         candidate_count=len(candidates),
         candidate_limit=max(1, rerank_candidate_limit),
@@ -287,10 +386,21 @@ def _retrieve_impl(
             "effective_mode": rerank_plan["effective_mode"],
             "applied": False,
             "reason": rerank_plan["reason"],
+            "message": _rerank_reason_label(str(rerank_plan["reason"])),
+            "status": "skipped",
         }
     )
 
     if rerank_plan["apply"] and candidates:
+        logger.info(
+            "准备执行 rerank: query=%r, requested=%s, effective=%s, candidates=%d/%d, reason=%s",
+            user_query[:50],
+            requested_rerank_mode,
+            rerank_plan["effective_mode"],
+            len(candidates),
+            max(1, rerank_candidate_limit),
+            rerank_plan["reason"],
+        )
         try:
             from app.services.rerank.reranker import get_reranker
 
@@ -312,25 +422,53 @@ def _retrieve_impl(
                 {
                     "applied": rerank_meta.get("applied", False),
                     "reason": rerank_meta.get("reason") or rerank_plan["reason"],
+                    "message": rerank_meta.get("message")
+                    or _rerank_reason_label(str(rerank_meta.get("reason") or rerank_plan["reason"])),
                     "fallback": bool(rerank_meta.get("fallback")),
                     "timed_out": bool(rerank_meta.get("timed_out")),
                     "elapsed_ms": rerank_meta.get("elapsed_ms", 0),
                     "candidate_count": rerank_count,
+                    "status": rerank_meta.get("status")
+                    or _rerank_status(
+                        applied=bool(rerank_meta.get("applied")),
+                        fallback=bool(rerank_meta.get("fallback")),
+                    ),
                 }
             )
-            logger.info("Rerank 耗时: %.2fs", time.time() - t0 - t_embed - t_search)
+            logger.info(
+                "Rerank 结果: query=%r, status=%s, reason=%s, fallback=%s, timed_out=%s, elapsed=%sms, scored=%d",
+                user_query[:50],
+                rerank_info["status"],
+                rerank_info["reason"],
+                rerank_info["fallback"],
+                rerank_info["timed_out"],
+                rerank_info["elapsed_ms"],
+                rerank_meta.get("scored_candidates", 0),
+            )
         except Exception as e:
-            logger.warning("Rerank 失败，跳过: %s", e)
+            logger.warning("Rerank 失败并回退: query=%r, error=%s", user_query[:50], e)
             rerank_info.update(
                 {
                     "applied": False,
                     "reason": f"error:{type(e).__name__}",
+                    "message": _rerank_reason_label(f"error:{type(e).__name__}"),
                     "fallback": True,
+                    "status": "fallback",
                 }
             )
+    elif candidates:
+        logger.info(
+            "跳过 rerank: query=%r, requested=%s, effective=%s, candidates=%d/%d, reason=%s",
+            user_query[:50],
+            requested_rerank_mode,
+            rerank_plan["effective_mode"],
+            len(candidates),
+            max(1, rerank_candidate_limit),
+            rerank_plan["reason"],
+        )
 
     filtered = _filter_hits(candidates, score_threshold=score_threshold, final_limit=max(1, top_n))
-    if expand_neighbors and filtered:
+    if effective_expand_neighbors and filtered:
         filtered = _expand_neighbor_turns(filtered, window=neighbor_turn_window)
 
     total_time = time.time() - t0
@@ -364,15 +502,24 @@ def _retrieve_impl(
         "final_count": len(filtered),
         "query_entities": query_entities,
         "expanded_entities": expanded_entities,
+        "graph_requested_mode": requested_graph_mode,
+        "graph_effective_mode": effective_graph_mode,
+        **_graph_debug(
+            graph_routed=retrieval_mode in {"entity", "mix"} and effective_graph_mode == "on",
+            graph_hits=graph_hits,
+        ),
         "rerank_requested_mode": rerank_info["requested_mode"],
         "rerank_effective_mode": rerank_info["effective_mode"],
         "rerank_applied": rerank_info["applied"],
+        "rerank_status": rerank_info["status"],
         "rerank_reason": rerank_info["reason"],
+        "rerank_message": rerank_info["message"],
         "rerank_fallback": rerank_info["fallback"],
         "rerank_timed_out": rerank_info["timed_out"],
         "rerank_elapsed_ms": rerank_info["elapsed_ms"],
         "rerank_candidate_limit": rerank_info["candidate_limit"],
         "rerank_candidate_count": rerank_info["candidate_count"],
+        **_query_analysis_debug(query_analysis),
         "embed_time": round(t_embed, 3),
         "search_time": round(t_search, 3),
         "total_time": round(total_time, 3),
@@ -462,72 +609,6 @@ def _apply_metadata_filters(
             continue
         filtered.append(hit)
     return filtered
-
-
-def _merge_candidates(
-    dense_hits: list[RetrievalHit],
-    keyword_hits: list[RetrievalHit],
-    entity_hits: list[RetrievalHit],
-    retrieval_mode: str,
-) -> list[RetrievalHit]:
-    if retrieval_mode == "vector":
-        return _normalize_scores(dense_hits, attr="score")
-    if retrieval_mode == "keyword":
-        for rank, hit in enumerate(keyword_hits, start=1):
-            hit.keyword_score = 1.0 / (_RRF_K + rank)
-        return _normalize_scores(keyword_hits, attr="keyword_score")
-    if retrieval_mode == "entity":
-        return _normalize_scores(entity_hits, attr="entity_score")
-
-    merged: dict[str, RetrievalHit] = {}
-    for rank, hit in enumerate(dense_hits, start=1):
-        item = merged.setdefault(hit.chunk_id, hit)
-        item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-
-    for rank, hit in enumerate(keyword_hits, start=1):
-        if hit.chunk_id in merged:
-            item = merged[hit.chunk_id]
-            item.keyword_score = hit.keyword_score
-            item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-        else:
-            hit.fused_score = (hit.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-            merged[hit.chunk_id] = hit
-
-    for rank, hit in enumerate(entity_hits, start=1):
-        if hit.chunk_id in merged:
-            item = merged[hit.chunk_id]
-            item.entity_score = hit.entity_score
-            item.entity_names = list(dict.fromkeys([*item.entity_names, *hit.entity_names]))
-            item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-        else:
-            hit.fused_score = (hit.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-            merged[hit.chunk_id] = hit
-
-    combined = sorted(
-        merged.values(),
-        key=lambda h: h.fused_score or h.score or h.keyword_score or h.entity_score or 0.0,
-        reverse=True,
-    )
-    return _normalize_scores(combined, attr="fused_score")
-
-
-def _normalize_scores(hits: list[RetrievalHit], attr: str) -> list[RetrievalHit]:
-    if not hits:
-        return []
-    raw_scores = [float(getattr(h, attr) or 0.0) for h in hits]
-    max_score = max(raw_scores)
-    min_score = min(raw_scores)
-
-    normalized: list[RetrievalHit] = []
-    for hit, raw in zip(hits, raw_scores, strict=False):
-        if max_score > min_score:
-            hit.score = (raw - min_score) / (max_score - min_score)
-        else:
-            hit.score = 1.0
-        normalized.append(hit)
-
-    normalized.sort(key=lambda h: h.score, reverse=True)
-    return normalized
 
 
 def _filter_hits(

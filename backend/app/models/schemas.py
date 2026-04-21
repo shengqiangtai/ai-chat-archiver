@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+ScoreValue = Optional[float]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 基础聊天归档
@@ -91,16 +93,16 @@ class RetrievalHit:
     chunk_id: str
     doc_id: str
     score: float
-    rerank_score: Optional[float]
+    rerank_score: ScoreValue
     platform: str
     title: str
     excerpt: str
     path: str
     created_at: str
     url: Optional[str] = None
-    keyword_score: Optional[float] = None
-    fused_score: Optional[float] = None
-    entity_score: Optional[float] = None
+    keyword_score: ScoreValue = None
+    fused_score: ScoreValue = None
+    entity_score: ScoreValue = None
     role_summary: str = ""
     message_range: str = ""
     model_name: Optional[str] = None
@@ -203,7 +205,7 @@ class SourceRef:
     title: str
     path: str
     score: float
-    rerank_score: Optional[float] = None
+    rerank_score: ScoreValue = None
     url: Optional[str] = None
     excerpt: str = ""
     message_range: str = ""

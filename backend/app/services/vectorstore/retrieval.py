@@ -17,6 +17,7 @@ from app.core.config import (
 )
 from app.db.sqlite import get_db
 from app.models.schemas import QueryAnalysis, RetrievalHit
+from app.services.retrieval.fusion import fuse_candidates
 from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
 from app.services.ingest.entity_extractor import extract_query_entities, normalize_entity_name
@@ -24,8 +25,6 @@ from app.services.retrieval.query_analysis import analyze_query
 from app.services.vectorstore.chroma_store import get_store
 
 logger = logging.getLogger("archiver.retrieval")
-
-_RRF_K = 60.0
 
 
 def _rerank_reason_label(reason: str) -> str:
@@ -328,7 +327,7 @@ def _retrieve_impl(
         entity_hits = [_row_to_hit(row) for row in entity_rows]
 
     t_search = time.time() - t0 - t_embed
-    candidates = _merge_candidates(dense_hits, keyword_hits, entity_hits, retrieval_mode)
+    candidates = fuse_candidates(dense_hits, keyword_hits, entity_hits, retrieval_mode)
     candidate_snapshot = [asdict(hit) for hit in candidates[:8]] if include_debug else []
     rerank_info["candidate_count"] = len(candidates)
 
@@ -560,72 +559,6 @@ def _apply_metadata_filters(
             continue
         filtered.append(hit)
     return filtered
-
-
-def _merge_candidates(
-    dense_hits: list[RetrievalHit],
-    keyword_hits: list[RetrievalHit],
-    entity_hits: list[RetrievalHit],
-    retrieval_mode: str,
-) -> list[RetrievalHit]:
-    if retrieval_mode == "vector":
-        return _normalize_scores(dense_hits, attr="score")
-    if retrieval_mode == "keyword":
-        for rank, hit in enumerate(keyword_hits, start=1):
-            hit.keyword_score = 1.0 / (_RRF_K + rank)
-        return _normalize_scores(keyword_hits, attr="keyword_score")
-    if retrieval_mode == "entity":
-        return _normalize_scores(entity_hits, attr="entity_score")
-
-    merged: dict[str, RetrievalHit] = {}
-    for rank, hit in enumerate(dense_hits, start=1):
-        item = merged.setdefault(hit.chunk_id, hit)
-        item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-
-    for rank, hit in enumerate(keyword_hits, start=1):
-        if hit.chunk_id in merged:
-            item = merged[hit.chunk_id]
-            item.keyword_score = hit.keyword_score
-            item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-        else:
-            hit.fused_score = (hit.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-            merged[hit.chunk_id] = hit
-
-    for rank, hit in enumerate(entity_hits, start=1):
-        if hit.chunk_id in merged:
-            item = merged[hit.chunk_id]
-            item.entity_score = hit.entity_score
-            item.entity_names = list(dict.fromkeys([*item.entity_names, *hit.entity_names]))
-            item.fused_score = (item.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-        else:
-            hit.fused_score = (hit.fused_score or 0.0) + 1.0 / (_RRF_K + rank)
-            merged[hit.chunk_id] = hit
-
-    combined = sorted(
-        merged.values(),
-        key=lambda h: h.fused_score or h.score or h.keyword_score or h.entity_score or 0.0,
-        reverse=True,
-    )
-    return _normalize_scores(combined, attr="fused_score")
-
-
-def _normalize_scores(hits: list[RetrievalHit], attr: str) -> list[RetrievalHit]:
-    if not hits:
-        return []
-    raw_scores = [float(getattr(h, attr) or 0.0) for h in hits]
-    max_score = max(raw_scores)
-    min_score = min(raw_scores)
-
-    normalized: list[RetrievalHit] = []
-    for hit, raw in zip(hits, raw_scores):
-        if max_score > min_score:
-            hit.score = (raw - min_score) / (max_score - min_score)
-        else:
-            hit.score = 1.0
-        normalized.append(hit)
-
-    normalized.sort(key=lambda h: h.score, reverse=True)
-    return normalized
 
 
 def _filter_hits(

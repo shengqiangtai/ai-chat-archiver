@@ -43,6 +43,7 @@ from app.services.llm.prompt_builder import (
     get_system_prompt,
 )
 from app.services.qa.citation import parse_llm_output
+from app.services.qa.grounding import evaluate_grounding
 from app.services.qa.query_rewrite import rewrite_query
 from app.services.vectorstore.chroma_store import get_store
 from app.services.vectorstore.retrieval import retrieve
@@ -75,6 +76,7 @@ async def qa_answer(
     date_to: str | None = None,
     retrieval_mode: str = "mix",
     rerank_mode: str = "auto",
+    graph_mode: str = "auto",
     rewrite_query_enabled: bool = True,
     include_debug: bool = False,
 ) -> AnswerResult:
@@ -103,6 +105,7 @@ async def qa_answer(
         neighbor_turn_window=1,
         use_cache=True,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
     )
     t_retrieve = time.time() - t0
 
@@ -183,6 +186,11 @@ async def qa_answer(
             unload_generator()
 
     result = parse_llm_output(raw_answer, hits)
+    grounding = evaluate_grounding(answer=result.answer, hits=hits)
+    if grounding.should_downgrade:
+        downgraded = parse_llm_output(build_fallback_answer(hits), hits)
+        downgraded.uncertainty = "现有来源对结论支撑不足，以下答案已降级为保守表述。"
+        result = downgraded
 
     if include_debug:
         result.debug = {
@@ -198,6 +206,14 @@ async def qa_answer(
             "low_memory_mode": UNLOAD_GENERATOR_AFTER_INFERENCE,
             "retrieval_mode": retrieval_mode,
             "rerank_mode": rerank_mode,
+            "graph_mode": graph_mode,
+            "grounding": {
+                "supported": grounding.supported,
+                "should_downgrade": grounding.should_downgrade,
+                "support_rate": grounding.support_rate,
+                "message": grounding.message,
+                "unsupported_claims": grounding.unsupported_claims[:3],
+            },
             "retrieved": [asdict(h) for h in hits],
         }
 
@@ -231,6 +247,7 @@ async def qa_answer_stream(
     date_to: str | None = None,
     retrieval_mode: str = "mix",
     rerank_mode: str = "auto",
+    graph_mode: str = "auto",
     rewrite_query_enabled: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
@@ -257,6 +274,7 @@ async def qa_answer_stream(
         neighbor_turn_window=1,
         use_cache=True,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
     )
 
     if not hits:

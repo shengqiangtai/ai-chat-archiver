@@ -159,6 +159,7 @@ class RetrievalDebug(BaseModel):
     graph_routed: bool = False
     graph_hit_count: int = 0
     graph_hits: List[Dict[str, Any]] = Field(default_factory=list)
+    grounding: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(extra="allow")
 

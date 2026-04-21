@@ -46,20 +46,21 @@ def _fuse_mix_candidates(
             continue
 
         existing.keyword_score = keyword_score
-        existing.fused_score = max(existing.fused_score or 0.0, keyword_score)
+        existing.fused_score = _add_score(existing.fused_score, keyword_score)
 
     for hit in entity_hits:
-        graph_score = min(_source_score(hit.entity_score, hit.score), GRAPH_SCORE_CAP)
+        entity_score = _source_score(hit.entity_score, hit.score)
+        graph_score = _graph_contribution(entity_score)
         existing = merged.get(hit.chunk_id)
         if existing is None:
-            hit.entity_score = graph_score
+            hit.entity_score = entity_score
             hit.fused_score = graph_score
             merged[hit.chunk_id] = hit
             continue
 
-        existing.entity_score = graph_score
+        existing.entity_score = entity_score
         existing.entity_names = list(dict.fromkeys([*existing.entity_names, *hit.entity_names]))
-        existing.fused_score = (existing.fused_score or 0.0) + graph_score
+        existing.fused_score = _add_score(existing.fused_score, graph_score)
 
     combined = sorted(
         merged.values(),
@@ -75,6 +76,15 @@ def _source_score(primary: Optional[float], fallback: Optional[float]) -> float:
     if fallback is not None:
         return float(fallback)
     return 0.0
+
+
+def _add_score(current: Optional[float], increment: float) -> float:
+    return float(current or 0.0) + float(increment)
+
+
+def _graph_contribution(entity_score: float) -> float:
+    bounded = max(0.0, min(float(entity_score), 1.0))
+    return bounded * GRAPH_SCORE_CAP
 
 
 def _normalize_scores(hits: List[RetrievalHit], attr: str) -> List[RetrievalHit]:

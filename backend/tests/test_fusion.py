@@ -44,12 +44,24 @@ def test_keyword_exact_match_stays_ahead_of_graph_only_hit_on_symbolic_query() -
     assert [hit.chunk_id for hit in hits] == ["chunk-a", "chunk-c"]
 
 
-def test_graph_score_is_capped_but_can_help_relation_query() -> None:
+def test_dense_and_keyword_overlap_adds_signal_and_beats_single_source_competitor() -> None:
     hits = fuse_candidates(
-        dense_hits=[_hit("chunk-a", score=0.54), _hit("chunk-b", score=0.51)],
-        keyword_hits=[],
-        entity_hits=[_hit("chunk-b", entity_score=1.0), _hit("chunk-c", entity_score=1.0)],
+        dense_hits=[_hit("chunk-a", score=0.40), _hit("chunk-b", score=0.75)],
+        keyword_hits=[_hit("chunk-a", keyword_score=0.42)],
+        entity_hits=[],
         retrieval_mode="mix",
     )
 
-    assert [hit.chunk_id for hit in hits] == ["chunk-b", "chunk-a", "chunk-c"]
+    assert [hit.chunk_id for hit in hits] == ["chunk-a", "chunk-b"]
+    assert hits[0].fused_score > hits[1].fused_score
+
+
+def test_graph_entity_relative_strength_survives_capping() -> None:
+    hits = fuse_candidates(
+        dense_hits=[],
+        keyword_hits=[],
+        entity_hits=[_hit("chunk-b", entity_score=0.80), _hit("chunk-c", entity_score=0.20)],
+        retrieval_mode="mix",
+    )
+
+    assert hits[0].fused_score > hits[1].fused_score

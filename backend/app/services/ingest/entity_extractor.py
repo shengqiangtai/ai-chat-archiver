@@ -6,6 +6,7 @@ import re
 from collections import Counter
 
 from app.models.schemas import Chunk, EntityMention
+from app.services.graph.relation_extractor import extract_relations
 from app.utils.hashing import text_hash
 
 _GENERIC_TOKENS = {
@@ -16,12 +17,16 @@ _GENERIC_TOKENS = {
 _TECH_ALLOWLIST = {
     "python", "fastapi", "chromadb", "sqlite", "qwen", "ollama", "lm studio", "chatgpt",
     "claude", "gemini", "deepseek", "poe", "rag", "rerank", "embedding", "transformers",
+    "codex", "codex cli", "skill", "skill-installer", "skill-creator", "plugin",
 }
 
 _FILE_RE = re.compile(r"\b[A-Za-z0-9_./-]+\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml|toml|sql|sh)\b")
+_PATH_RE = re.compile(r"(?:~|/|\$[A-Z_][A-Z0-9_]*)(?:/[A-Za-z0-9_.-]+)+/?")
+_COMMAND_RE = re.compile(r"(?:\$)?[a-z][a-z0-9]*(?:-[a-z0-9]+)+\b")
 _MODEL_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_.:/-]{2,}(?:-[A-Za-z0-9_.:/-]+)+\b")
 _CAMEL_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+|[A-Z]{2,}[A-Za-z0-9_-]*)\b")
 _PHRASE_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+(?:\s+[A-Z][a-z0-9]+)+)\b")
+_MIXED_PHRASE_RE = re.compile(r"\b(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,})(?:\s+(?:[A-Z][A-Za-z0-9]+|[A-Z]{2,})){1,2}\b")
 _CJK_TERM_RE = re.compile(r"[\u4e00-\u9fff]{2,10}(?:模型|向量库|检索|索引|缓存|工作流|问答|嵌入|重排|引用|对话)")
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:/-]{2,48}")
 
@@ -29,6 +34,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:/-]{2,48}")
 def normalize_entity_name(name: str) -> str:
     normalized = re.sub(r"\s+", " ", (name or "").strip())
     normalized = normalized.strip("`'\"[](){}<>.,;:!?")
+    normalized = normalized.lstrip("$")
     return normalized.lower()
 
 
@@ -38,11 +44,20 @@ def extract_entities_from_text(text: str) -> list[tuple[str, str]]:
 
     candidates: list[tuple[str, str]] = []
 
+    for match in _PATH_RE.findall(text):
+        candidates.append((match, "path"))
+        tail = match.rstrip("/").split("/")[-1]
+        if "." in tail:
+            candidates.append((tail, "file"))
     for match in _FILE_RE.findall(text):
         candidates.append((match, "file"))
+    for match in _COMMAND_RE.findall(text):
+        candidates.append((match, "command"))
     for match in _MODEL_RE.findall(text):
         candidates.append((match, "model"))
     for match in _PHRASE_RE.findall(text):
+        candidates.append((match, "phrase"))
+    for match in _MIXED_PHRASE_RE.findall(text):
         candidates.append((match, "phrase"))
     for match in _CAMEL_RE.findall(text):
         candidates.append((match, "tech"))
@@ -71,6 +86,20 @@ def extract_entities_from_text(text: str) -> list[tuple[str, str]]:
 
 
 def extract_entities_from_chunk(chunk: Chunk) -> list[EntityMention]:
+    mentions, _ = extract_graph_metadata_from_chunk(chunk)
+    return mentions
+
+
+def extract_entities_from_chunks(chunks: list[Chunk]) -> list[EntityMention]:
+    mentions: list[EntityMention] = []
+    for chunk in chunks:
+        chunk_mentions, chunk_relations = extract_graph_metadata_from_chunk(chunk)
+        setattr(chunk, "graph_relations", chunk_relations)
+        mentions.extend(chunk_mentions)
+    return mentions
+
+
+def extract_graph_metadata_from_chunk(chunk: Chunk) -> tuple[list[EntityMention], list[dict[str, str]]]:
     mentions: list[EntityMention] = []
     seen: set[str] = set()
     raw_entities = extract_entities_from_text(chunk.text)
@@ -105,14 +134,12 @@ def extract_entities_from_chunk(chunk: Chunk) -> list[EntityMention]:
             )
         )
 
-    return mentions
-
-
-def extract_entities_from_chunks(chunks: list[Chunk]) -> list[EntityMention]:
-    mentions: list[EntityMention] = []
-    for chunk in chunks:
-        mentions.extend(extract_entities_from_chunk(chunk))
-    return mentions
+    relations = extract_relations(
+        chunk_id=chunk.chunk_id,
+        text=chunk.text,
+        entity_names=[mention.name for mention in mentions],
+    )
+    return mentions, relations
 
 
 def extract_query_entities(query: str, limit: int = 8) -> list[str]:

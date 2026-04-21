@@ -11,11 +11,11 @@ _RELATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bused for\b", re.IGNORECASE), "used_for"),
     (re.compile(r"\buses\b", re.IGNORECASE), "uses"),
 ]
+_TOKEN_CHARS = r"A-Za-z0-9_./:-"
 
 
-def _entity_positions(text: str, entity_names: list[str]) -> list[tuple[int, str]]:
-    lowered = text.lower()
-    positions: list[tuple[int, str]] = []
+def _entity_occurrences(text: str, entity_names: list[str]) -> list[tuple[int, int, str]]:
+    occurrences: list[tuple[int, int, str]] = []
     seen: set[str] = set()
 
     for entity_name in entity_names:
@@ -25,34 +25,36 @@ def _entity_positions(text: str, entity_names: list[str]) -> list[tuple[int, str
         norm = name.lower()
         if norm in seen:
             continue
-        idx = lowered.find(norm)
-        if idx < 0:
-            continue
         seen.add(norm)
-        positions.append((idx, name))
 
-    positions.sort(key=lambda item: item[0])
-    return positions
+        pattern = re.compile(
+            rf"(?<![{_TOKEN_CHARS}]){re.escape(name)}(?![{_TOKEN_CHARS}])",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            occurrences.append((match.start(), match.end(), name))
+
+    occurrences.sort(key=lambda item: (item[0], item[1], item[2].lower()))
+    return occurrences
 
 
 def _pick_relation_entities(
     *,
-    entity_positions: list[tuple[int, str]],
+    entity_occurrences: list[tuple[int, int, str]],
     relation_start: int,
     relation_end: int,
 ) -> tuple[str, str] | None:
-    source = None
-    target = None
+    before = [occ for occ in entity_occurrences if occ[1] <= relation_start]
+    after = [occ for occ in entity_occurrences if occ[0] >= relation_end]
 
-    for idx, name in entity_positions:
-        if idx < relation_start:
-            source = name
-        elif idx >= relation_end:
-            target = name
-            break
+    if not before or not after:
+        return None
 
-    if source and target and source.lower() != target.lower():
-        return source, target
+    source = max(before, key=lambda item: (item[1], item[0]))
+    target = min(after, key=lambda item: (item[0], item[1]))
+
+    if source[2].lower() != target[2].lower():
+        return source[2], target[2]
     return None
 
 
@@ -61,8 +63,8 @@ def extract_relations(*, chunk_id: str, text: str, entity_names: list[str]) -> l
     if not text or not entity_names:
         return []
 
-    entity_positions = _entity_positions(text, entity_names)
-    if len(entity_positions) < 2:
+    entity_occurrences = _entity_occurrences(text, entity_names)
+    if len(entity_occurrences) < 2:
         return []
 
     relations: list[dict[str, str]] = []
@@ -71,7 +73,7 @@ def extract_relations(*, chunk_id: str, text: str, entity_names: list[str]) -> l
     for pattern, relation_type in _RELATION_PATTERNS:
         for match in pattern.finditer(text):
             picked = _pick_relation_entities(
-                entity_positions=entity_positions,
+                entity_occurrences=entity_occurrences,
                 relation_start=match.start(),
                 relation_end=match.end(),
             )

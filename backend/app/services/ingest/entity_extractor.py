@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from app.db.sqlite import get_db
 from app.models.schemas import Chunk, EntityMention
 from app.services.graph.relation_extractor import extract_relations
 from app.utils.hashing import text_hash
@@ -93,17 +92,17 @@ def extract_entities_from_chunk(chunk: Chunk) -> list[EntityMention]:
 
 def extract_entities_from_chunks(chunks: list[Chunk]) -> list[EntityMention]:
     mentions: list[EntityMention] = []
+    for chunk in chunks:
+        mentions.extend(extract_entities_from_chunk(chunk))
+    return mentions
+
+
+def extract_graph_relations_from_chunks(chunks: list[Chunk]) -> list[dict[str, str]]:
     relations: list[dict[str, str]] = []
     for chunk in chunks:
-        chunk_mentions, chunk_relations = extract_graph_metadata_from_chunk(chunk)
-        mentions.extend(chunk_mentions)
+        _, chunk_relations = extract_graph_metadata_from_chunk(chunk)
         relations.extend(chunk_relations)
-
-    if relations:
-        created_at = chunks[0].created_at if chunks else ""
-        get_db().upsert_graph_relations(relations, created_at=created_at)
-
-    return mentions
+    return relations
 
 
 def extract_graph_metadata_from_chunk(chunk: Chunk) -> tuple[list[EntityMention], list[dict[str, str]]]:

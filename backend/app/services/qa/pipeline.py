@@ -8,7 +8,8 @@ import logging
 import time
 from dataclasses import asdict
 from datetime import datetime
-from typing import AsyncGenerator, Callable
+from pathlib import Path
+from typing import AsyncGenerator, Callable, Optional
 
 from app.core.config import (
     RERANK_TOP_N,
@@ -25,11 +26,15 @@ from app.services.ingest.chunker import chunk_document
 from app.services.ingest.deduper import (
     clear_file_index,
     deduplicate_chunks,
+    get_skip_reason,
     register_chunks,
     register_file,
     should_skip_file,
 )
-from app.services.ingest.entity_extractor import extract_entities_from_chunks
+from app.services.ingest.entity_extractor import (
+    extract_entities_from_chunks,
+    extract_graph_relations_from_chunks,
+)
 from app.services.ingest.loader import load_document, scan_chat_files
 from app.services.llm.generator import get_generator, unload_generator
 from app.services.llm.prompt_builder import (
@@ -44,7 +49,14 @@ from app.services.vectorstore.retrieval import retrieve
 
 logger = logging.getLogger("archiver.qa.pipeline")
 
-ProgressCallback = Callable[[int, int, int, str], None]
+ProgressCallback = Callable[[int, int, int, str, Optional[dict]], None]
+
+
+def _persist_graph_metadata(db, chunks, created_at: str) -> int:
+    relations = extract_graph_relations_from_chunks(chunks)
+    if not relations:
+        return 0
+    return int(db.upsert_graph_relations(relations, created_at=created_at) or 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -61,7 +73,7 @@ async def qa_answer(
     tag_filter: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     rerank_mode: str = "auto",
     rewrite_query_enabled: bool = True,
     include_debug: bool = False,
@@ -217,7 +229,7 @@ async def qa_answer_stream(
     tag_filter: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     rerank_mode: str = "auto",
     rewrite_query_enabled: bool = True,
 ) -> AsyncGenerator[str, None]:
@@ -318,6 +330,7 @@ def rebuild_index(progress_cb: ProgressCallback | None = None) -> dict:
                     extract_entities_from_chunks(chunks),
                     created_at=doc.created_at,
                 )
+                _persist_graph_metadata(db, chunks, doc.created_at)
                 register_chunks(chunks)
                 register_file(doc, len(chunks))
         except Exception as e:
@@ -325,7 +338,17 @@ def rebuild_index(progress_cb: ProgressCallback | None = None) -> dict:
 
         processed += 1
         if progress_cb:
-            progress_cb(processed, total_files, total_chunks, str(md_path))
+            progress_cb(
+                processed,
+                total_files,
+                total_chunks,
+                str(md_path),
+                {
+                    "scanned_files": total_files,
+                    "skipped_files": 0,
+                    "skip_reasons": {},
+                },
+            )
 
     set_last_index_time(datetime.now().isoformat(timespec="seconds"))
     logger.info("全量索引完成: files=%d, chunks=%d", total_files, total_chunks)
@@ -359,16 +382,40 @@ def incremental_index(
     embedder = get_embedder()
 
     selected: list[tuple[Path, Path]] = []
+    skipped_files = 0
+    skip_reasons: dict[str, int] = {}
     for md_path, meta_path in files:
         doc = load_document(md_path, meta_path)
-        if not should_skip_file(doc):
-            selected.append((md_path, meta_path))
+        reason = get_skip_reason(doc)
+        if reason:
+            skipped_files += 1
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+            continue
+        selected.append((md_path, meta_path))
 
     total_files = len(selected)
     processed = 0
     total_chunks = 0
 
-    logger.info("开始增量索引: %d / %d 个文件需要更新", total_files, len(files))
+    logger.info(
+        "开始增量索引: %d / %d 个文件需要更新，跳过 %d 个文件",
+        total_files,
+        len(files),
+        skipped_files,
+    )
+
+    if progress_cb:
+        progress_cb(
+            0,
+            total_files,
+            total_chunks,
+            "",
+            {
+                "scanned_files": len(files),
+                "skipped_files": skipped_files,
+                "skip_reasons": skip_reasons,
+            },
+        )
 
     for md_path, meta_path in selected:
         try:
@@ -390,6 +437,7 @@ def incremental_index(
                         extract_entities_from_chunks(unique_chunks),
                         created_at=doc.created_at,
                     )
+                    _persist_graph_metadata(db, unique_chunks, doc.created_at)
                     register_chunks(unique_chunks)
                 register_file(doc, len(chunks))
         except Exception as e:
@@ -397,7 +445,17 @@ def incremental_index(
 
         processed += 1
         if progress_cb:
-            progress_cb(processed, total_files, total_chunks, str(md_path))
+            progress_cb(
+                processed,
+                total_files,
+                total_chunks,
+                str(md_path),
+                {
+                    "scanned_files": len(files),
+                    "skipped_files": skipped_files,
+                    "skip_reasons": skip_reasons,
+                },
+            )
 
     set_last_index_time(datetime.now().isoformat(timespec="seconds"))
     logger.info("增量索引完成: files=%d, chunks=%d", total_files, total_chunks)
@@ -412,8 +470,11 @@ def incremental_index(
         pass
 
     return {
+        "scanned_files": len(files),
         "total_files": total_files,
         "processed_files": processed,
+        "skipped_files": skipped_files,
+        "skip_reasons": skip_reasons,
         "total_chunks": total_chunks,
     }
 
@@ -425,3 +486,73 @@ def delete_doc_index(doc_id: str) -> int:
     get_db().delete_kb_chunks_by_doc(doc_id)
     get_cache().clear_all()
     return deleted
+
+
+def cleanup_index_integrity() -> dict:
+    """清理失效的聊天元数据与索引残留，不触碰仍存在的归档目录。"""
+    db = get_db()
+    store = get_store()
+
+    orphan_chats = db.list_orphan_chats()
+    stale_file_records = db.list_stale_file_records()
+    chat_ids = db.list_chat_ids()
+    kb_docs = db.list_kb_doc_sources()
+    chunk_hash_docs = db.list_chunk_hash_docs()
+
+    orphan_doc_ids: set[str] = set()
+    for item in orphan_chats:
+        orphan_doc_ids.add(str(item["id"]))
+    for item in stale_file_records:
+        doc_id = str(item.get("doc_id") or "")
+        if doc_id:
+            orphan_doc_ids.add(doc_id)
+    for item in kb_docs:
+        doc_id = str(item.get("doc_id") or "")
+        source_path = str(item.get("source_path") or "")
+        if doc_id and (doc_id not in chat_ids or (source_path and not Path(source_path).exists())):
+            orphan_doc_ids.add(doc_id)
+    for doc_id in chunk_hash_docs:
+        if doc_id not in chat_ids:
+            orphan_doc_ids.add(doc_id)
+
+    removed_chats = 0
+    for item in orphan_chats:
+        if db.purge_chat_metadata(str(item["id"])):
+            removed_chats += 1
+
+    removed_file_records = 0
+    processed_doc_ids: set[str] = set()
+    for item in stale_file_records:
+        file_path = str(item.get("file_path") or "")
+        doc_id = str(item.get("doc_id") or "")
+        if file_path:
+            db.delete_file_record(file_path)
+            removed_file_records += 1
+        if doc_id:
+            processed_doc_ids.add(doc_id)
+
+    removed_chunks = 0
+    removed_vector_docs = 0
+    removed_chunk_hash_docs = 0
+    for doc_id in sorted(orphan_doc_ids):
+        removed_chunks += db.delete_kb_chunks_by_doc(doc_id)
+        removed_vector_docs += store.delete_by_doc_id(doc_id)
+        db.delete_chunk_hashes_by_doc(doc_id)
+        removed_chunk_hash_docs += 1
+        if doc_id not in processed_doc_ids:
+            removed_file_records += db.delete_file_records_by_doc(doc_id)
+
+    get_cache().clear_all()
+
+    return {
+        "orphan_chat_count": len(orphan_chats),
+        "stale_file_record_count": len(stale_file_records),
+        "orphan_doc_count": len(orphan_doc_ids),
+        "removed_chats": removed_chats,
+        "removed_file_records": removed_file_records,
+        "removed_vector_docs": removed_vector_docs,
+        "removed_chunks": removed_chunks,
+        "removed_chunk_hash_docs": removed_chunk_hash_docs,
+        "sample_orphan_chat_ids": [str(item["id"]) for item in orphan_chats[:5]],
+        "sample_orphan_doc_ids": sorted(orphan_doc_ids)[:5],
+    }

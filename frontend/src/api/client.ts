@@ -1,4 +1,4 @@
-import type { KbSearchResponse, RerankMode } from '../types'
+import type { CleanupResult, GraphMode, KbSearchResponse, RerankMode } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8765'
 
@@ -44,6 +44,7 @@ export const api = {
   reindex: () => request<any>('/api/kb/reindex', { method: 'POST' }),
   reindexIncremental: () => request<any>('/api/kb/reindex/incremental', { method: 'POST' }),
   getIndexProgress: (taskId: string) => request<any>(`/api/kb/reindex/progress/${taskId}`),
+  cleanupKbIndex: () => request<CleanupResult>('/api/kb/maintenance/cleanup', { method: 'POST' }),
 
   kbSearch: (
     query: string,
@@ -52,6 +53,7 @@ export const api = {
       platformFilter?: string
       retrievalMode?: 'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'
       rerankMode?: RerankMode
+      graphMode?: GraphMode
       includeDebug?: boolean
       rewriteQuery?: boolean
     },
@@ -62,18 +64,26 @@ export const api = {
         query,
         top_k: options?.topK ?? 10,
         platform_filter: options?.platformFilter || null,
-        retrieval_mode: options?.retrievalMode || 'hybrid',
+        retrieval_mode: options?.retrievalMode || 'mix',
         rerank_mode: options?.rerankMode || 'auto',
+        graph_mode: options?.graphMode || 'auto',
         include_debug: options?.includeDebug ?? false,
         rewrite_query: options?.rewriteQuery ?? true,
         score_threshold: 0.25,
       }),
     }),
 
-  kbQA: (query: string, mode = 'concise', topK = 15, topN = 5, rerankMode: RerankMode = 'auto') =>
+  kbQA: (
+    query: string,
+    mode = 'concise',
+    topK = 15,
+    topN = 5,
+    rerankMode: RerankMode = 'auto',
+    graphMode: GraphMode = 'auto',
+  ) =>
     request<any>('/api/kb/qa', {
       method: 'POST',
-      body: JSON.stringify({ query, mode, top_k: topK, top_n: topN, rerank_mode: rerankMode }),
+      body: JSON.stringify({ query, mode, top_k: topK, top_n: topN, rerank_mode: rerankMode, graph_mode: graphMode }),
     }),
 
   kbQAStreamUrl: () => `${API_BASE}/api/kb/qa/stream`,

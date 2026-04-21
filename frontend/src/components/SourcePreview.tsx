@@ -18,6 +18,11 @@ export default function SourcePreview({ hit, index, onViewChat }: Props) {
   const score = Math.round((hit.rerank_score ?? hit.score) * 100)
   const color = PLATFORM_COLORS[hit.platform] || '#6b7280'
   const text = hit.excerpt.replace(/\n+/g, ' ').slice(0, 200)
+  const reasons = [
+    hit.score > 0 ? '语义召回' : null,
+    hit.keyword_score != null ? '关键词命中' : null,
+    hit.entity_score != null || (hit.entity_names && hit.entity_names.length > 0) ? '图/实体增强' : null,
+  ].filter(Boolean) as string[]
 
   return (
     <div className="bg-[#1f2937] border border-[#374151] rounded-xl p-4 hover:border-[#3b82f6]/40 transition">
@@ -58,9 +63,22 @@ export default function SourcePreview({ hit, index, onViewChat }: Props) {
 
       <p className="text-xs text-[#9ca3af] leading-relaxed line-clamp-3">{text}...</p>
 
+      {reasons.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {reasons.map((reason) => (
+            <span
+              key={reason}
+              className="inline-flex items-center rounded-full border border-[#334155] bg-[#0f172a] px-2 py-0.5 text-[11px] text-[#cbd5e1]"
+            >
+              {reason}
+            </span>
+          ))}
+        </div>
+      )}
+
       {hit.entity_names && hit.entity_names.length > 0 && (
         <div className="mt-2 text-[11px] text-[#93c5fd]">
-          实体: {hit.entity_names.slice(0, 4).join(', ')}
+          实体命中: {hit.entity_names.slice(0, 4).join(', ')}
         </div>
       )}
 

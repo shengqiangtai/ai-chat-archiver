@@ -45,3 +45,28 @@ def _average_over_total(values: Iterable[float], total: int) -> float:
 def _average_optional(values: Iterable[float]) -> float | None:
     collected = list(values)
     return (sum(collected) / len(collected)) if collected else None
+
+
+def format_markdown_summary(summary: EvaluationSummary) -> str:
+    graph_route_rate = summary.metadata.get("graph_route_rate")
+    relation_win_rate = summary.metadata.get("relation_win_rate")
+    avg_graph_hits = summary.metadata.get("avg_graph_hits")
+
+    lines = [
+        f"## Mode: {summary.mode}",
+        f"- Total cases: {summary.total_cases}",
+        f"- Evaluated cases: {summary.evaluated_cases}",
+        f"- Failed cases: {summary.failed_cases}",
+        f"- Recall@5: {summary.recall_at_5:.3f}",
+        f"- HitRate@5: {summary.hit_rate_at_5:.3f}",
+        f"- Recall@10: {summary.recall_at_10:.3f}",
+        f"- MRR@10: {summary.mrr_at_10:.3f}",
+        f"- Avg elapsed seconds: {summary.avg_elapsed_seconds:.3f}" if summary.avg_elapsed_seconds is not None else "- Avg elapsed seconds: n/a",
+    ]
+    if graph_route_rate is not None:
+        lines.append(f"- Graph route rate: {float(graph_route_rate):.3f}")
+    if relation_win_rate is not None:
+        lines.append(f"- Relation win rate: {float(relation_win_rate):.3f}")
+    if avg_graph_hits is not None:
+        lines.append(f"- Avg graph hits: {float(avg_graph_hits):.3f}")
+    return "\n".join(lines)

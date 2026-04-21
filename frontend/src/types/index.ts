@@ -32,6 +32,14 @@ export interface QueryAnalysis {
   reasons: string[]
 }
 
+export interface GroundingDebug {
+  supported: boolean
+  should_downgrade: boolean
+  support_rate: number
+  message: string
+  unsupported_claims?: string[]
+}
+
 export interface Citation {
   source_id: string
   reason: string
@@ -86,6 +94,7 @@ export interface RetrievalDebug {
   expanded_entities?: string[]
   query_analysis?: QueryAnalysis
   analysis_scope?: string
+  grounding?: GroundingDebug
   dense_hits: RetrievalHit[]
   keyword_hits: RetrievalHit[]
   entity_hits: RetrievalHit[]

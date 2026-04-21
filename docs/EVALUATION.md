@@ -19,6 +19,11 @@
 - `local`: 直接调用后端检索链路
 - `http`: 通过 `/api/kb/search` 请求后端
 
+当前 benchmark 里的 graph 对比使用两条路径：
+
+- `mix`: `graph_mode=off`，作为 graph baseline
+- `mix_graph`: `graph_mode=auto`，只在 query analysis 判断合适时启用 graph 路径
+
 ## Benchmark Schema
 
 每个 case 现在使用 typed schema，而不是 `title_contains` / `keyword_any` 这类启发式判定。
@@ -69,6 +74,13 @@ runner 会优先按 chunk id 评测；如果 case 没有 chunk id，则按 sourc
 - `HitRate@5` 用于衡量最少命中能力
 - `MRR@10` 用于衡量相关结果排在前面的程度
 
+除了主检索指标，当前 summary 还会输出 graph 相关的辅助指标：
+
+- `graph_routed_cases`: 本轮 benchmark 中实际走到 graph 路径的 case 数量
+- `avg_graph_hits`: 平均每个 case 获得的 graph candidate 数
+
+这些指标不替代 Recall/MRR，它们只用于解释 graph 路径究竟有没有真正被触发。
+
 ## Runner Behaviour
 
 `evaluate_retrieval_case` 会：
@@ -117,7 +129,7 @@ python tests/run_rag_benchmark.py --transport http --case-limit 5
 ```bash
 cd backend
 . .venv/bin/activate
-python tests/run_rag_benchmark.py --mode mix --mode mix_rerank
+python tests/run_rag_benchmark.py --mode mix --mode mix_graph --mode mix_rerank
 ```
 
 输出完整 JSON：
@@ -138,4 +150,4 @@ python tests/run_rag_benchmark.py --json
 
 - 把每个问题的 `expected_chunk_ids` 和真实 corpus 中的 chunk id 对齐
 - 继续扩充 relation / context resolution 类 case
-- 再在此基础上做更高级的 graph-enhanced retrieval 对比
+- 再在此基础上做更细的 graph-enhanced retrieval 对比，例如 relation question 的单独 win-rate

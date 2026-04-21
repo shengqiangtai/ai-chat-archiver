@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
 import { api } from '../api/client'
-import type { RetrievalDebug, RerankMode, SourceRef, SSEEvent } from '../types'
+import type { KbStatus, RetrievalDebug, RerankMode, SourceRef, SSEEvent } from '../types'
 import SourcePreview from '../components/SourcePreview'
 import ReindexPanel from '../components/ReindexPanel'
 import SearchBox from '../components/SearchBox'
@@ -18,6 +18,18 @@ interface QAMessage {
   uncertainty?: string | null
 }
 
+function rerankStatusTone(status?: 'skipped' | 'applied' | 'fallback') {
+  if (status === 'applied') return 'text-emerald-300 border-emerald-700/60 bg-emerald-950/30'
+  if (status === 'fallback') return 'text-amber-300 border-amber-700/60 bg-amber-950/30'
+  return 'text-slate-300 border-slate-700/60 bg-slate-900/40'
+}
+
+function rerankStatusLabel(status?: 'skipped' | 'applied' | 'fallback') {
+  if (status === 'applied') return '已执行'
+  if (status === 'fallback') return '已回退'
+  return '已跳过'
+}
+
 export default function KnowledgeBaseQA() {
   const [subTab, setSubTab] = useState<SubTab>('qa')
   const [messages, setMessages] = useState<QAMessage[]>([])
@@ -25,18 +37,22 @@ export default function KnowledgeBaseQA() {
   const [sending, setSending] = useState(false)
   const [platform, setPlatform] = useState('')
   const [mode, setMode] = useState<'concise' | 'detailed'>('concise')
-  const [qaRetrievalMode, setQaRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('hybrid')
+  const [qaRetrievalMode, setQaRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('mix')
   const [qaRerankMode, setQaRerankMode] = useState<RerankMode>('auto')
+  const [kbStatus, setKbStatus] = useState<KbStatus | null>(null)
+  const [kbStatusError, setKbStatusError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   // 语义搜索状态
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchPlatform, setSearchPlatform] = useState('')
-  const [searchRetrievalMode, setSearchRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('hybrid')
+  const [searchRetrievalMode, setSearchRetrievalMode] = useState<'hybrid' | 'vector' | 'keyword' | 'entity' | 'mix'>('mix')
   const [searchRerankMode, setSearchRerankMode] = useState<RerankMode>('auto')
   const [searchDebug, setSearchDebug] = useState<RetrievalDebug | null>(null)
   const [searchRewrite, setSearchRewrite] = useState<{ rewritten?: string; applied?: boolean; strategy?: string } | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
 
   const scrollToBottom = useCallback(() => {
     if (listRef.current) {
@@ -45,10 +61,27 @@ export default function KnowledgeBaseQA() {
   }, [])
 
   useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
+  useEffect(() => {
+    api.getKbStatus()
+      .then((data) => {
+        setKbStatus(data)
+        setKbStatusError(null)
+      })
+      .catch((err: any) => {
+        setKbStatusError(err.message || '知识库状态加载失败')
+      })
+  }, [])
 
   const handleSend = async () => {
     const question = input.trim()
     if (!question || sending) return
+    if (kbStatus && kbStatus.total_chunks === 0) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'ai', content: '知识库当前还没有可检索的内容。请先归档聊天并执行索引。' },
+      ])
+      return
+    }
 
     setInput('')
     setSending(true)
@@ -148,6 +181,8 @@ export default function KnowledgeBaseQA() {
 
   const handleSemanticSearch = async (query: string) => {
     setSearchLoading(true)
+    setHasSearched(true)
+    setSearchError(null)
     try {
       const data = await api.kbSearch(query, {
         topK: 10,
@@ -168,10 +203,33 @@ export default function KnowledgeBaseQA() {
       setSearchResults([])
       setSearchDebug(null)
       setSearchRewrite(null)
+      setSearchError('检索请求失败。请确认后端正在运行，且知识库已经建立。')
     } finally {
       setSearchLoading(false)
     }
   }
+
+  const qaEmptyState = (() => {
+    if (kbStatusError) {
+      return {
+        title: '知识库状态读取失败',
+        detail: kbStatusError,
+      }
+    }
+    if (kbStatus?.total_chats === 0) {
+      return {
+        title: '还没有归档聊天记录',
+        detail: '先归档至少一条 AI 聊天，再回来做语义搜索和知识库问答。',
+      }
+    }
+    if (kbStatus && kbStatus.total_chats > 0 && kbStatus.total_chunks === 0) {
+      return {
+        title: '聊天已归档，但知识库未建立',
+        detail: '请先到“管理”页执行一次全量重建索引。',
+      }
+    }
+    return null
+  })()
 
   return (
     <div className="space-y-4">
@@ -251,12 +309,18 @@ export default function KnowledgeBaseQA() {
           <div ref={listRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && (
               <div className="text-center text-[#6b7280] py-20">
-                <div className="text-4xl mb-3">🔍</div>
-                <div className="text-sm">输入你的问题，比如：</div>
+                <div className="text-4xl mb-3">{qaEmptyState ? '📦' : '🔍'}</div>
+                <div className="text-sm">{qaEmptyState?.title || '输入你的问题，比如：'}</div>
                 <div className="text-xs mt-2 space-y-1">
-                  <div className="text-[#3b82f6]">"我之前讨论过哪些关于机器学习的话题？"</div>
-                  <div className="text-[#3b82f6]">"上次关于 Python 异步编程的对话内容"</div>
-                  <div className="text-[#3b82f6]">"帮我找一下之前关于数据库设计的建议"</div>
+                  {qaEmptyState ? (
+                    <div className="text-[#fbbf24]">{qaEmptyState.detail}</div>
+                  ) : (
+                    <>
+                      <div className="text-[#3b82f6]">"我之前讨论过哪些关于机器学习的话题？"</div>
+                      <div className="text-[#3b82f6]">"上次关于 Python 异步编程的对话内容"</div>
+                      <div className="text-[#3b82f6]">"帮我找一下之前关于数据库设计的建议"</div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -339,7 +403,7 @@ export default function KnowledgeBaseQA() {
             />
             <button
               onClick={handleSend}
-              disabled={sending || !input.trim()}
+              disabled={sending || !input.trim() || (!!kbStatus && kbStatus.total_chunks === 0)}
               className="px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-50 text-white rounded-lg text-sm font-medium self-end transition"
             >
               {sending ? '生成中...' : '发送'}
@@ -404,6 +468,13 @@ export default function KnowledgeBaseQA() {
             </div>
           )}
 
+          {searchError && (
+            <div className="bg-[#7f1d1d]/20 border border-[#7f1d1d] rounded-xl p-3 text-xs text-[#fecaca]">
+              <div className="font-medium mb-1">检索失败</div>
+              <div>{searchError}</div>
+            </div>
+          )}
+
           {searchDebug && (searchDebug.query_entities?.length || searchDebug.expanded_entities?.length) && (
             <div className="bg-[#0f172a] border border-[#334155] rounded-xl p-3 text-xs space-y-2">
               <div className="text-[#cbd5e1] font-medium">实体扩展</div>
@@ -422,6 +493,50 @@ export default function KnowledgeBaseQA() {
 
           {searchDebug && (
             <div className="bg-[#0b1220] border border-[#243244] rounded-xl p-4 space-y-4">
+              {searchDebug.query_analysis && (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-[#334155] bg-[#0f172a] px-3 py-3 text-xs space-y-2">
+                    <div className="text-[#cbd5e1] font-medium">Query Analysis</div>
+                    <div className="text-[#94a3b8]">
+                      type: <span className="text-[#e2e8f0]">{searchDebug.query_analysis.query_type}</span>
+                      {' · '}
+                      scope: <span className="text-[#e2e8f0]">{searchDebug.analysis_scope || 'n/a'}</span>
+                    </div>
+                    <div className="text-[#94a3b8]">
+                      rewrite: <span className="text-[#e2e8f0]">{searchDebug.query_analysis.enable_rewrite ? 'on' : 'off'}</span>
+                      {' · '}
+                      rerank: <span className="text-[#e2e8f0]">{searchDebug.query_analysis.enable_rerank ? 'on' : 'off'}</span>
+                      {' · '}
+                      graph: <span className="text-[#e2e8f0]">{searchDebug.query_analysis.enable_graph ? 'on' : 'off'}</span>
+                    </div>
+                    {searchDebug.query_analysis.reasons.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {searchDebug.query_analysis.reasons.map((reason) => (
+                          <span
+                            key={reason}
+                            className="inline-flex items-center rounded-full border border-[#334155] bg-[#111827] px-2 py-0.5 text-[11px] text-[#cbd5e1]"
+                          >
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-[#334155] bg-[#0f172a] px-3 py-3 text-xs space-y-2">
+                    <div className="text-[#cbd5e1] font-medium">Graph Routing</div>
+                    <div className="text-[#94a3b8]">
+                      requested: <span className="text-[#e2e8f0]">{searchDebug.graph_requested_mode || 'auto'}</span>
+                      {' · '}
+                      effective: <span className="text-[#e2e8f0]">{searchDebug.graph_effective_mode || 'off'}</span>
+                    </div>
+                    <div className="text-[#94a3b8]">
+                      routed: <span className="text-[#e2e8f0]">{searchDebug.graph_routed ? 'yes' : 'no'}</span>
+                      {' · '}
+                      graph hits: <span className="text-[#e2e8f0]">{searchDebug.graph_hit_count}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 text-xs">
                 {[
                   ['dense', searchDebug.dense_count ?? '-'],
@@ -435,7 +550,13 @@ export default function KnowledgeBaseQA() {
                   <div key={label} className="px-2 py-1 rounded bg-[#162033] text-[#cbd5e1]">
                     {label}: {value}
                   </div>
-                ))}
+                  ))}
+              </div>
+              <div className={`rounded-xl border px-3 py-2 text-xs ${rerankStatusTone(searchDebug.rerank_status)}`}>
+                <div className="font-medium mb-1">
+                  Rerank {rerankStatusLabel(searchDebug.rerank_status)}
+                </div>
+                <div>{searchDebug.rerank_message || '本次检索未执行 rerank。'}</div>
               </div>
               <div className="text-xs text-[#94a3b8]">
                 rerank requested: <span className="text-[#e2e8f0]">{searchDebug.rerank_requested_mode || 'auto'}</span>
@@ -453,6 +574,7 @@ export default function KnowledgeBaseQA() {
                   { title: 'Dense Top', hits: searchDebug.dense_hits },
                   { title: 'Keyword Top', hits: searchDebug.keyword_hits },
                   { title: 'Entity Top', hits: searchDebug.entity_hits },
+                  { title: 'Graph Top', hits: searchDebug.graph_hits || [] },
                   { title: 'Final Top', hits: searchDebug.final_hits },
                 ].map(({ title, hits }) => (
                   <div key={title} className="space-y-2">
@@ -471,7 +593,26 @@ export default function KnowledgeBaseQA() {
           )}
 
           {searchResults.length === 0 && !searchLoading && (
-            <div className="text-center text-[#6b7280] py-10 text-sm">输入关键词进行语义检索</div>
+            <div className="text-center text-[#6b7280] py-10 text-sm space-y-2">
+              {kbStatus?.total_chats === 0 ? (
+                <>
+                  <div className="text-[#fbbf24]">还没有归档聊天，当前无法进行语义检索。</div>
+                  <div>请先归档一条聊天记录。</div>
+                </>
+              ) : kbStatus && kbStatus.total_chats > 0 && kbStatus.total_chunks === 0 ? (
+                <>
+                  <div className="text-[#fbbf24]">聊天已归档，但知识库还没有建立。</div>
+                  <div>请先到“管理”页执行重建索引。</div>
+                </>
+              ) : hasSearched ? (
+                <>
+                  <div className="text-[#e5e7eb]">没有找到相关结果。</div>
+                  <div>可以尝试换一个说法、切换检索模式，或关闭 rerank 再试。</div>
+                </>
+              ) : (
+                <div>输入关键词进行语义检索</div>
+              )}
+            </div>
           )}
 
           <div className="space-y-3">

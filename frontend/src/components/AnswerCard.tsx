@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
-import type { SourceRef, Citation } from '../types'
+import type { SourceRef, Citation, RetrievalDebug } from '../types'
 import CitationList from './CitationList'
 
 interface Props {
@@ -9,11 +9,12 @@ interface Props {
   citations: Citation[]
   uncertainty: string | null
   sources: SourceRef[]
+  debug?: RetrievalDebug
   isStreaming?: boolean
   onSourceClick?: (sourceId: string) => void
 }
 
-export default function AnswerCard({ answer, citations, uncertainty, sources, isStreaming, onSourceClick }: Props) {
+export default function AnswerCard({ answer, citations, uncertainty, sources, debug, isStreaming, onSourceClick }: Props) {
   return (
     <div className="bg-[#1f2937] border border-[#374151] rounded-xl p-4 space-y-3">
       <div className="prose prose-invert prose-sm max-w-none
@@ -39,6 +40,19 @@ export default function AnswerCard({ answer, citations, uncertainty, sources, is
       {uncertainty && (
         <div className="text-xs text-[#f59e0b] bg-[#f59e0b]/10 border border-[#f59e0b]/20 rounded-lg px-3 py-2">
           ⚠️ {uncertainty}
+        </div>
+      )}
+
+      {debug?.grounding && (
+        <div className="text-xs text-[#cbd5e1] bg-[#0f172a] border border-[#334155] rounded-lg px-3 py-2 space-y-1">
+          <div className="font-medium text-[#e2e8f0]">Grounding</div>
+          <div>
+            supported: <span className="text-[#93c5fd]">{debug.grounding.supported ? 'yes' : 'no'}</span>
+            {' · '}
+            support rate: <span className="text-[#93c5fd]">{Math.round(debug.grounding.support_rate * 100)}%</span>
+            {' · '}
+            message: <span className="text-[#93c5fd]">{debug.grounding.message}</span>
+          </div>
         </div>
       )}
 

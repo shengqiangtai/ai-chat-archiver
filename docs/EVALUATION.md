@@ -86,6 +86,8 @@ cd backend
 python tests/run_rag_benchmark.py
 ```
 
+默认情况下脚本会取 `top_k=10`，这样 `Recall@10` 和 `MRR@10` 才是按完整前 10 个结果计算的。
+
 只跑前 5 个 case：
 
 ```bash
@@ -121,6 +123,8 @@ python tests/run_rag_benchmark.py --json
 ## Notes
 
 当前 fixture 里的 `expected_chunk_ids` 已经从标题/关键词启发式切到了 typed schema，但它们仍然需要和真实标注的 chunk id 对齐。
+
+如果你把 `--top-k` 调小到 10 以下，`Recall@10` 和 `MRR@10` 仍然会显示，但它们只会基于实际返回的候选结果计算，不再代表“完整前 10 条”的评测。
 
 后续如果要把 benchmark 做成真正稳定的回归集，最重要的是：
 

@@ -205,7 +205,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8765", help="后端地址")
     parser.add_argument("--transport", choices=["local", "http"], default="local", help="local=直接调用后端检索链路，http=通过 API 请求")
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE, help="benchmark 用例文件")
-    parser.add_argument("--top-k", type=int, default=5, help="每次检索返回的候选数")
+    parser.add_argument("--top-k", type=int, default=10, help="每次检索返回的候选数，默认 10 以支持 @10 指标")
     parser.add_argument("--case-limit", type=int, default=0, help="仅跑前 N 个用例，0 表示全部")
     parser.add_argument("--mode", action="append", dest="modes", help="只跑指定 mode，可重复传入")
     parser.add_argument("--json", action="store_true", help="输出完整 JSON")

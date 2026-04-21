@@ -54,6 +54,16 @@ def _rerank_status(*, applied: bool, fallback: bool) -> str:
     return "skipped"
 
 
+def _effective_rerank_mode(*, use_rerank: bool, requested_mode: str) -> str:
+    if not use_rerank:
+        return "off"
+    if requested_mode == "off":
+        return "off"
+    if requested_mode == "auto":
+        return "auto"
+    return "on"
+
+
 def retrieve(
     query: str,
     top_k: int = RETRIEVAL_TOP_K,
@@ -175,6 +185,10 @@ def _retrieve_impl(
     query_analysis = analyze_query(user_query)
     effective_use_rerank = use_rerank and query_analysis.enable_rerank
     effective_expand_neighbors = expand_neighbors and query_analysis.enable_graph
+    effective_rerank_mode = _effective_rerank_mode(
+        use_rerank=effective_use_rerank,
+        requested_mode=requested_rerank_mode,
+    )
 
     cache_options = {
         "top_k": top_k,
@@ -209,7 +223,7 @@ def _retrieve_impl(
                 "query_entities": [],
                 "expanded_entities": [],
                 "rerank_requested_mode": requested_rerank_mode,
-                "rerank_effective_mode": requested_rerank_mode,
+                "rerank_effective_mode": effective_rerank_mode,
                 "rerank_applied": False,
                 "rerank_status": "skipped",
                 "rerank_reason": "cache_hit",
@@ -224,7 +238,7 @@ def _retrieve_impl(
                 "entity_hits": [],
                 "candidate_hits": [],
                 "final_hits": [asdict(hit) for hit in hits],
-                "query_analysis": asdict(query_analysis),
+                "query_analysis": None,
             } if include_debug else {}
             logger.info("命中检索缓存: query=%r", user_query[:50])
             return hits, debug
@@ -282,7 +296,7 @@ def _retrieve_impl(
         )
         keyword_hits = [_row_to_hit(row) for row in keyword_rows]
 
-    if retrieval_mode in {"entity", "mix"}:
+    if retrieval_mode in {"entity", "mix"} and effective_expand_neighbors:
         query_entities = extract_query_entities(user_query)
         seed_entities = get_db().search_entities(query_entities, limit=max(4, top_k))
         expanded_entities = [normalize_entity_name(str(item.get("norm_name") or "")) for item in seed_entities]
@@ -449,7 +463,7 @@ def _retrieve_impl(
         "rerank_elapsed_ms": rerank_info["elapsed_ms"],
         "rerank_candidate_limit": rerank_info["candidate_limit"],
         "rerank_candidate_count": rerank_info["candidate_count"],
-        "query_analysis": asdict(query_analysis),
+        "query_analysis": None,
         "embed_time": round(t_embed, 3),
         "search_time": round(t_search, 3),
         "total_time": round(total_time, 3),

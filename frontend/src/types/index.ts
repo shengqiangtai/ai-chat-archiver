@@ -101,7 +101,7 @@ export interface QAResponse {
   citations: Citation[]
   uncertainty: string | null
   sources: SourceRef[]
-  debug?: Record<string, unknown>
+  debug?: RetrievalDebug
 }
 
 export interface KbStatus {

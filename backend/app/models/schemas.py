@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,8 +23,8 @@ class SaveRequest(BaseModel):
     model: Optional[str] = None
     title: str
     url: Optional[str] = None
-    tags: list[str] = Field(default_factory=list)
-    messages: list[Message] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    messages: List[Message] = Field(default_factory=list)
 
 
 class SearchRequest(BaseModel):
@@ -104,10 +104,19 @@ class RetrievalHit:
     role_summary: str = ""
     message_range: str = ""
     model_name: Optional[str] = None
-    tags: list[str] = field(default_factory=list)
-    entity_names: list[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    entity_names: List[str] = field(default_factory=list)
     turn_index: int = 0
     chunk_index: int = 0
+
+
+@dataclass
+class QueryAnalysis:
+    query_type: str
+    enable_rewrite: bool
+    enable_rerank: bool
+    enable_graph: bool
+    reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -134,7 +143,7 @@ class KbSearchRequest(BaseModel):
     tag_filter: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    retrieval_mode: str = "hybrid"
+    retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
     score_threshold: float = 0.30
     rewrite_query: bool = True
@@ -143,7 +152,7 @@ class KbSearchRequest(BaseModel):
 
 class KbSearchResponse(BaseModel):
     query: str
-    hits: list[dict] = Field(default_factory=list)
+    hits: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = 0
 
 
@@ -157,17 +166,17 @@ class QARequest(BaseModel):
     tag_filter: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    retrieval_mode: str = "hybrid"
+    retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
     rewrite_query: bool = True
 
 
 class QAResponse(BaseModel):
     answer: str
-    citations: list[dict] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
     uncertainty: Optional[str] = None
-    sources: list[dict] = Field(default_factory=list)
-    debug: Optional[dict] = None
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    debug: Optional[Dict[str, Any]] = None
 
 
 class OllamaModelUpdateRequest(BaseModel):
@@ -202,7 +211,7 @@ class Citation:
 @dataclass
 class AnswerResult:
     answer: str
-    citations: list[Citation]
+    citations: List[Citation]
     uncertainty: Optional[str]
-    sources: list[SourceRef]
-    debug: dict[str, Any] = field(default_factory=dict)
+    sources: List[SourceRef]
+    debug: Dict[str, Any] = field(default_factory=dict)

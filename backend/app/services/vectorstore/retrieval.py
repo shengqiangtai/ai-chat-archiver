@@ -20,11 +20,38 @@ from app.models.schemas import RetrievalHit
 from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
 from app.services.ingest.entity_extractor import extract_query_entities, normalize_entity_name
+from app.services.retrieval.query_analysis import analyze_query
 from app.services.vectorstore.chroma_store import get_store
 
 logger = logging.getLogger("archiver.retrieval")
 
 _RRF_K = 60.0
+
+
+def _rerank_reason_label(reason: str) -> str:
+    mapping = {
+        "disabled": "已关闭 rerank",
+        "no_candidates": "没有可精排的候选",
+        "candidate_limit_exceeded": "候选数超过阈值，已跳过 rerank",
+        "within_limit": "候选数在阈值内，准备执行 rerank",
+        "forced": "已强制执行 rerank",
+        "forced_clipped": "已强制执行 rerank，但只处理前几条候选",
+        "model_unavailable": "reranker 不可用，已回退到原始检索顺序",
+        "timeout": "rerank 超时，已回退到原始检索顺序",
+        "ok": "rerank 已执行",
+        "cache_hit": "命中缓存，未重新执行 rerank",
+    }
+    if reason.startswith("error:"):
+        return f"rerank 执行失败，已回退到原始检索顺序（{reason.split(':', 1)[1]}）"
+    return mapping.get(reason, reason or "未知原因")
+
+
+def _rerank_status(*, applied: bool, fallback: bool) -> str:
+    if applied:
+        return "applied"
+    if fallback:
+        return "fallback"
+    return "skipped"
 
 
 def retrieve(
@@ -38,7 +65,7 @@ def retrieve(
     date_to: Optional[str] = None,
     score_threshold: float = RETRIEVAL_SCORE_THRESHOLD,
     use_rerank: bool = True,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     expand_neighbors: bool = True,
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
@@ -80,7 +107,7 @@ def retrieve_debug(
     date_to: Optional[str] = None,
     score_threshold: float = RETRIEVAL_SCORE_THRESHOLD,
     use_rerank: bool = True,
-    retrieval_mode: str = "hybrid",
+    retrieval_mode: str = "mix",
     expand_neighbors: bool = False,
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
@@ -139,12 +166,15 @@ def _retrieve_impl(
     if not user_query:
         return [], {}
 
-    retrieval_mode = (retrieval_mode or "hybrid").strip().lower()
+    retrieval_mode = (retrieval_mode or "mix").strip().lower()
     if retrieval_mode not in {"hybrid", "vector", "keyword", "entity", "mix"}:
-        retrieval_mode = "hybrid"
+        retrieval_mode = "mix"
     requested_rerank_mode = (rerank_mode or DEFAULT_RERANK_MODE).strip().lower()
     if requested_rerank_mode not in {"auto", "off", "on"}:
         requested_rerank_mode = DEFAULT_RERANK_MODE
+    query_analysis = analyze_query(user_query)
+    effective_use_rerank = use_rerank and query_analysis.enable_rerank
+    effective_expand_neighbors = expand_neighbors and query_analysis.enable_graph
 
     cache_options = {
         "top_k": top_k,
@@ -155,9 +185,9 @@ def _retrieve_impl(
         "date_from": date_from,
         "date_to": date_to,
         "score_threshold": score_threshold,
-        "use_rerank": use_rerank,
+        "use_rerank": effective_use_rerank,
         "retrieval_mode": retrieval_mode,
-        "expand_neighbors": expand_neighbors,
+        "expand_neighbors": effective_expand_neighbors,
         "neighbor_turn_window": neighbor_turn_window,
         "rerank_mode": requested_rerank_mode,
         "rerank_timeout_ms": rerank_timeout_ms,
@@ -181,7 +211,9 @@ def _retrieve_impl(
                 "rerank_requested_mode": requested_rerank_mode,
                 "rerank_effective_mode": requested_rerank_mode,
                 "rerank_applied": False,
+                "rerank_status": "skipped",
                 "rerank_reason": "cache_hit",
+                "rerank_message": _rerank_reason_label("cache_hit"),
                 "rerank_fallback": False,
                 "rerank_timed_out": False,
                 "rerank_elapsed_ms": 0,
@@ -192,6 +224,7 @@ def _retrieve_impl(
                 "entity_hits": [],
                 "candidate_hits": [],
                 "final_hits": [asdict(hit) for hit in hits],
+                "query_analysis": asdict(query_analysis),
             } if include_debug else {}
             logger.info("命中检索缓存: query=%r", user_query[:50])
             return hits, debug
@@ -214,6 +247,8 @@ def _retrieve_impl(
         "elapsed_ms": 0,
         "candidate_limit": max(1, rerank_candidate_limit),
         "candidate_count": 0,
+        "message": _rerank_reason_label("disabled"),
+        "status": "skipped",
     }
 
     if retrieval_mode in {"hybrid", "vector", "mix"}:
@@ -277,7 +312,7 @@ def _retrieve_impl(
     rerank_info["candidate_count"] = len(candidates)
 
     rerank_plan = _plan_rerank(
-        use_rerank=use_rerank,
+        use_rerank=effective_use_rerank,
         requested_mode=requested_rerank_mode,
         candidate_count=len(candidates),
         candidate_limit=max(1, rerank_candidate_limit),
@@ -287,10 +322,21 @@ def _retrieve_impl(
             "effective_mode": rerank_plan["effective_mode"],
             "applied": False,
             "reason": rerank_plan["reason"],
+            "message": _rerank_reason_label(str(rerank_plan["reason"])),
+            "status": "skipped",
         }
     )
 
     if rerank_plan["apply"] and candidates:
+        logger.info(
+            "准备执行 rerank: query=%r, requested=%s, effective=%s, candidates=%d/%d, reason=%s",
+            user_query[:50],
+            requested_rerank_mode,
+            rerank_plan["effective_mode"],
+            len(candidates),
+            max(1, rerank_candidate_limit),
+            rerank_plan["reason"],
+        )
         try:
             from app.services.rerank.reranker import get_reranker
 
@@ -312,25 +358,53 @@ def _retrieve_impl(
                 {
                     "applied": rerank_meta.get("applied", False),
                     "reason": rerank_meta.get("reason") or rerank_plan["reason"],
+                    "message": rerank_meta.get("message")
+                    or _rerank_reason_label(str(rerank_meta.get("reason") or rerank_plan["reason"])),
                     "fallback": bool(rerank_meta.get("fallback")),
                     "timed_out": bool(rerank_meta.get("timed_out")),
                     "elapsed_ms": rerank_meta.get("elapsed_ms", 0),
                     "candidate_count": rerank_count,
+                    "status": rerank_meta.get("status")
+                    or _rerank_status(
+                        applied=bool(rerank_meta.get("applied")),
+                        fallback=bool(rerank_meta.get("fallback")),
+                    ),
                 }
             )
-            logger.info("Rerank 耗时: %.2fs", time.time() - t0 - t_embed - t_search)
+            logger.info(
+                "Rerank 结果: query=%r, status=%s, reason=%s, fallback=%s, timed_out=%s, elapsed=%sms, scored=%d",
+                user_query[:50],
+                rerank_info["status"],
+                rerank_info["reason"],
+                rerank_info["fallback"],
+                rerank_info["timed_out"],
+                rerank_info["elapsed_ms"],
+                rerank_meta.get("scored_candidates", 0),
+            )
         except Exception as e:
-            logger.warning("Rerank 失败，跳过: %s", e)
+            logger.warning("Rerank 失败并回退: query=%r, error=%s", user_query[:50], e)
             rerank_info.update(
                 {
                     "applied": False,
                     "reason": f"error:{type(e).__name__}",
+                    "message": _rerank_reason_label(f"error:{type(e).__name__}"),
                     "fallback": True,
+                    "status": "fallback",
                 }
             )
+    elif candidates:
+        logger.info(
+            "跳过 rerank: query=%r, requested=%s, effective=%s, candidates=%d/%d, reason=%s",
+            user_query[:50],
+            requested_rerank_mode,
+            rerank_plan["effective_mode"],
+            len(candidates),
+            max(1, rerank_candidate_limit),
+            rerank_plan["reason"],
+        )
 
     filtered = _filter_hits(candidates, score_threshold=score_threshold, final_limit=max(1, top_n))
-    if expand_neighbors and filtered:
+    if effective_expand_neighbors and filtered:
         filtered = _expand_neighbor_turns(filtered, window=neighbor_turn_window)
 
     total_time = time.time() - t0
@@ -367,12 +441,15 @@ def _retrieve_impl(
         "rerank_requested_mode": rerank_info["requested_mode"],
         "rerank_effective_mode": rerank_info["effective_mode"],
         "rerank_applied": rerank_info["applied"],
+        "rerank_status": rerank_info["status"],
         "rerank_reason": rerank_info["reason"],
+        "rerank_message": rerank_info["message"],
         "rerank_fallback": rerank_info["fallback"],
         "rerank_timed_out": rerank_info["timed_out"],
         "rerank_elapsed_ms": rerank_info["elapsed_ms"],
         "rerank_candidate_limit": rerank_info["candidate_limit"],
         "rerank_candidate_count": rerank_info["candidate_count"],
+        "query_analysis": asdict(query_analysis),
         "embed_time": round(t_embed, 3),
         "search_time": round(t_search, 3),
         "total_time": round(total_time, 3),

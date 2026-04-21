@@ -66,12 +66,13 @@ def load_cases(path: Path) -> list[BenchmarkCase]:
             BenchmarkCase(
                 id=str(item["id"]),
                 question=str(item["question"]),
-                expected_chunk_ids=[str(chunk_id) for chunk_id in item.get("expected_chunk_ids") or []],
                 question_type=str(item["question_type"]),
                 difficulty=str(item["difficulty"]),
                 source_type=str(item["source_type"]),
                 requires_relation_reasoning=bool(item.get("requires_relation_reasoning", False)),
                 requires_context_resolution=bool(item.get("requires_context_resolution", False)),
+                expected_chunk_ids=[str(chunk_id) for chunk_id in item.get("expected_chunk_ids") or []],
+                expected_source_titles=[str(title) for title in item.get("expected_source_titles") or []],
                 notes=(str(item["notes"]) if item.get("notes") is not None else None),
             )
         )
@@ -154,13 +155,13 @@ def run_mode(
                 response = post_json(f"{base_url.rstrip('/')}/api/kb/search", payload)
             else:
                 response = run_local_search(payload)
-            ranked_chunk_ids = [hit.get("chunk_id") for hit in (response.get("hits") or []) if isinstance(hit, dict)]
+            ranked_hits = response.get("hits") or []
             elapsed_seconds = ((response.get("debug") or {}).get("total_time"))
             if elapsed_seconds is None:
                 elapsed_seconds = round(time.monotonic() - started_at, 3)
             result = evaluate_retrieval_case(
                 case=case,
-                ranked_chunk_ids=ranked_chunk_ids,
+                ranked_chunk_ids=ranked_hits,
                 mode=mode.name,
                 elapsed_seconds=float(elapsed_seconds) if elapsed_seconds is not None else None,
             )
@@ -168,14 +169,12 @@ def run_mode(
         except (HTTPError, URLError, TimeoutError, ValueError) as err:
             errors.append(f"{case.id}: {err}")
 
-    summary = build_evaluation_summary(mode=mode.name, cases=case_results)
+    summary = build_evaluation_summary(mode=mode.name, cases=case_results, total_cases=len(cases))
     summary_dict = asdict(summary)
     summary_dict.update(
         {
             "retrieval_mode": mode.retrieval_mode,
             "rerank_mode": mode.rerank_mode,
-            "total_cases": len(cases),
-            "evaluated_cases": len(case_results),
             "errors": errors,
         }
     )
@@ -184,8 +183,8 @@ def run_mode(
 
 def format_summary(results: list[dict[str, Any]]) -> str:
     lines = [
-        "mode         recall@5  hit@5    recall@10  mrr@10   avg-seconds  evaluated/errors",
-        "-----------  --------  -------  ---------  -------  -----------  ----------------",
+        "mode         recall@5  hit@5    recall@10  mrr@10   avg-seconds  evaluated/total  failed",
+        "-----------  --------  -------  ---------  -------  -----------  ---------------  ------",
     ]
     for item in results:
         lines.append(
@@ -195,7 +194,8 @@ def format_summary(results: list[dict[str, Any]]) -> str:
             f"{item['recall_at_10']:<9.3f}  "
             f"{item['mrr_at_10']:<7.3f}  "
             f"{(item['avg_elapsed_seconds'] if item['avg_elapsed_seconds'] is not None else '-'):>11}  "
-            f"{item['evaluated_cases']}/{len(item['errors'])}"
+            f"{item['evaluated_cases']}/{item['total_cases']:<13}  "
+            f"{item['failed_cases']}"
         )
     return "\n".join(lines)
 

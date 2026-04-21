@@ -8,12 +8,13 @@ from typing import Any
 class BenchmarkCase:
     id: str
     question: str
-    expected_chunk_ids: list[str]
     question_type: str
     difficulty: str
     source_type: str
     requires_relation_reasoning: bool
     requires_context_resolution: bool
+    expected_chunk_ids: list[str] = field(default_factory=list)
+    expected_source_titles: list[str] = field(default_factory=list)
     notes: str | None = None
 
 
@@ -25,8 +26,6 @@ class RetrievalEvalResult:
     difficulty: str
     source_type: str
     mode: str
-    expected_chunk_ids: list[str]
-    ranked_chunk_ids: list[str]
     recall_at_5: float
     hit_rate_at_5: float
     recall_at_10: float
@@ -34,12 +33,17 @@ class RetrievalEvalResult:
     elapsed_seconds: float | None
     requires_relation_reasoning: bool
     requires_context_resolution: bool
+    expected_chunk_ids: list[str] = field(default_factory=list)
+    expected_source_titles: list[str] = field(default_factory=list)
+    ranked_chunk_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class EvaluationSummary:
     mode: str
-    case_count: int
+    total_cases: int
+    evaluated_cases: int
+    failed_cases: int
     recall_at_5: float
     hit_rate_at_5: float
     recall_at_10: float

@@ -27,7 +27,7 @@
 {
   "id": "skill-install-01",
   "question": "codex skills 安装",
-  "expected_chunk_ids": ["codex-skills-install-guide"],
+  "expected_source_titles": ["Codex Skills 安装指南"],
   "question_type": "installation",
   "difficulty": "easy",
   "source_type": "chat",
@@ -40,12 +40,20 @@
 
 - `id`: 用例唯一标识
 - `question`: 要检索的问题
-- `expected_chunk_ids`: 这个问题应该命中的一个或多个 chunk
+- `expected_chunk_ids`: 这个问题应该命中的一个或多个 chunk，必须是精确 chunk id
+- `expected_source_titles`: 当仓库里还没有可直接引用的 chunk id 时，使用精确 source title 作为稳定回退
 - `question_type`: 问题类型，例如 `installation`、`path_lookup`、`relation`
 - `difficulty`: `easy` / `medium` / `hard`
 - `source_type`: 数据来源类型，例如 `chat`
 - `requires_relation_reasoning`: 是否需要关系推理
 - `requires_context_resolution`: 是否需要上下文消解
+
+每个 case 只需要提供一种 ground truth 入口：
+
+- 有精确 chunk id 时，填 `expected_chunk_ids`
+- 没有可直接复用的 chunk id 时，填 `expected_source_titles`
+
+runner 会优先按 chunk id 评测；如果 case 没有 chunk id，则按 source title 做精确匹配。这里仍然是 typed ground truth，不回退到标题包含或关键词包含那种启发式规则。
 
 ## Metrics
 
@@ -66,7 +74,7 @@
 `evaluate_retrieval_case` 会：
 
 - 接收 `BenchmarkCase`
-- 将检索结果归一化成 `ranked_chunk_ids`
+- 将检索结果归一化成可比较的 ranked identifiers
 - 计算 recall / hit rate / MRR
 - 原样保留 case 上的关系推理和上下文消解标记
 
@@ -86,7 +94,7 @@ cd backend
 python tests/run_rag_benchmark.py
 ```
 
-默认情况下脚本会取 `top_k=10`，这样 `Recall@10` 和 `MRR@10` 才是按完整前 10 个结果计算的。
+默认情况下脚本会取 `top_k=10`，这样 `Recall@10` 和 `MRR@10` 才是按完整前 10 个结果计算的。当前 fixture 使用 `expected_source_titles` 作为 ground truth，所以这些指标衡量的是“前 10 个结果里是否命中该 source title 对应的真实聊天”。
 
 只跑前 5 个 case：
 
@@ -122,7 +130,7 @@ python tests/run_rag_benchmark.py --json
 
 ## Notes
 
-当前 fixture 里的 `expected_chunk_ids` 已经从标题/关键词启发式切到了 typed schema，但它们仍然需要和真实标注的 chunk id 对齐。
+当前 fixture 使用的是精确 `expected_source_titles`，因为仓库里没有公开的真实 chunk 标注可以直接写进 fixture。等后续补齐稳定的 chunk 标注后，可以把对应 case 切回 `expected_chunk_ids`，runner 会继续兼容。
 
 如果你把 `--top-k` 调小到 10 以下，`Recall@10` 和 `MRR@10` 仍然会显示，但它们只会基于实际返回的候选结果计算，不再代表“完整前 10 条”的评测。
 

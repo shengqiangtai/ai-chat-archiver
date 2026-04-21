@@ -2,7 +2,7 @@
   {
     "id": "skill-install-01",
     "question": "codex skills 安装",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "installation",
     "difficulty": "easy",
     "source_type": "chat",
@@ -12,7 +12,7 @@
   {
     "id": "skill-install-02",
     "question": "codex 一些常见的 skill 去哪里安装",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "installation",
     "difficulty": "easy",
     "source_type": "chat",
@@ -22,7 +22,7 @@
   {
     "id": "skill-path-01",
     "question": "本地 skill 应该放在哪",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "path_lookup",
     "difficulty": "easy",
     "source_type": "chat",
@@ -32,7 +32,7 @@
   {
     "id": "skill-path-02",
     "question": "SKILL.md 放哪",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "path_lookup",
     "difficulty": "easy",
     "source_type": "chat",
@@ -42,7 +42,7 @@
   {
     "id": "skill-path-03",
     "question": "项目级 skill 应该放在哪个目录",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "path_lookup",
     "difficulty": "easy",
     "source_type": "chat",
@@ -52,7 +52,7 @@
   {
     "id": "skill-path-04",
     "question": "用户级 skill 目录是什么",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "path_lookup",
     "difficulty": "easy",
     "source_type": "chat",
@@ -62,7 +62,7 @@
   {
     "id": "skill-create-01",
     "question": "自己写一个本地 skill 最简单怎么做",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "creation",
     "difficulty": "medium",
     "source_type": "chat",
@@ -72,7 +72,7 @@
   {
     "id": "skill-create-02",
     "question": "skill-creator 是干什么的",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "creation",
     "difficulty": "medium",
     "source_type": "chat",
@@ -82,7 +82,7 @@
   {
     "id": "skill-create-03",
     "question": "如果懒得手写 skill 骨架怎么办",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "creation",
     "difficulty": "medium",
     "source_type": "chat",
@@ -92,7 +92,7 @@
   {
     "id": "skill-disable-01",
     "question": "临时禁用某个 skill 怎么做",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "config",
     "difficulty": "medium",
     "source_type": "chat",
@@ -102,7 +102,7 @@
   {
     "id": "skill-disable-02",
     "question": "config.toml 里怎么禁用 skill",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "config",
     "difficulty": "medium",
     "source_type": "chat",
@@ -112,7 +112,7 @@
   {
     "id": "skill-install-03",
     "question": "安装官方精选 skill 用什么命令",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "command",
     "difficulty": "easy",
     "source_type": "chat",
@@ -122,7 +122,7 @@
   {
     "id": "skill-install-04",
     "question": "现成常见 skill 从哪里装",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "installation",
     "difficulty": "easy",
     "source_type": "chat",
@@ -132,7 +132,7 @@
   {
     "id": "plugin-01",
     "question": "别人打包好的技能包应该怎么装",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "installation",
     "difficulty": "medium",
     "source_type": "chat",
@@ -142,7 +142,7 @@
   {
     "id": "plugin-02",
     "question": "plugin marketplace 的路径在哪",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "path_lookup",
     "difficulty": "medium",
     "source_type": "chat",
@@ -152,7 +152,7 @@
   {
     "id": "platform-01",
     "question": "Codex app 和 CLI 用的是不是同一套 skills",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "relation",
     "difficulty": "hard",
     "source_type": "chat",
@@ -162,7 +162,7 @@
   {
     "id": "platform-02",
     "question": "IDE extension 和 CLI 的 skill 机制是不是一致",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "relation",
     "difficulty": "hard",
     "source_type": "chat",
@@ -172,7 +172,7 @@
   {
     "id": "system-skill-01",
     "question": "system skill 需要自己安装吗",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "system",
     "difficulty": "easy",
     "source_type": "chat",
@@ -182,7 +182,7 @@
   {
     "id": "system-skill-02",
     "question": "有哪些 skill 可能是 Codex 自带的",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "system",
     "difficulty": "easy",
     "source_type": "chat",
@@ -192,7 +192,7 @@
   {
     "id": "path-scan-01",
     "question": "Codex 会从哪些目录扫描项目里的 skill",
-    "expected_chunk_ids": ["codex-skills-install-guide"],
+    "expected_source_titles": ["Codex Skills 安装指南"],
     "question_type": "scan",
     "difficulty": "medium",
     "source_type": "chat",

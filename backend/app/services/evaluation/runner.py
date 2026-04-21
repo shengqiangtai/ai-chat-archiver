@@ -18,24 +18,26 @@ def evaluate_retrieval_case(
     mode: str,
     elapsed_seconds: float | None = None,
 ) -> RetrievalEvalResult:
-    normalized_ranked_chunk_ids = _normalize_ranked_chunk_ids(ranked_chunk_ids)
+    relevance_mode = _select_relevance_mode(case)
+    expected_relevance_ids = _expected_relevance_ids(case, relevance_mode)
+    normalized_ranked_chunk_ids = _normalize_ranked_relevance_ids(ranked_chunk_ids, relevance_mode)
     recall_at_5 = compute_recall_at_k(
-        expected_chunk_ids=case.expected_chunk_ids,
+        expected_chunk_ids=expected_relevance_ids,
         ranked_chunk_ids=normalized_ranked_chunk_ids,
         k=5,
     )
     hit_rate_at_5 = compute_hit_rate_at_k(
-        expected_chunk_ids=case.expected_chunk_ids,
+        expected_chunk_ids=expected_relevance_ids,
         ranked_chunk_ids=normalized_ranked_chunk_ids,
         k=5,
     )
     recall_at_10 = compute_recall_at_k(
-        expected_chunk_ids=case.expected_chunk_ids,
+        expected_chunk_ids=expected_relevance_ids,
         ranked_chunk_ids=normalized_ranked_chunk_ids,
         k=10,
     )
     mrr_at_10 = compute_mrr(
-        expected_chunk_ids=case.expected_chunk_ids,
+        expected_chunk_ids=expected_relevance_ids,
         ranked_chunk_ids=normalized_ranked_chunk_ids,
         k=10,
     )
@@ -47,6 +49,7 @@ def evaluate_retrieval_case(
         source_type=case.source_type,
         mode=mode,
         expected_chunk_ids=list(case.expected_chunk_ids),
+        expected_source_titles=list(case.expected_source_titles),
         ranked_chunk_ids=normalized_ranked_chunk_ids,
         recall_at_5=recall_at_5,
         hit_rate_at_5=hit_rate_at_5,
@@ -58,13 +61,49 @@ def evaluate_retrieval_case(
     )
 
 
-def _normalize_ranked_chunk_ids(ranked_chunk_ids: Sequence[Any]) -> list[str]:
+def _select_relevance_mode(case: BenchmarkCase) -> str:
+    if case.expected_chunk_ids:
+        return "chunk_id"
+    if case.expected_source_titles:
+        return "source_title"
+    return "none"
+
+
+def _expected_relevance_ids(case: BenchmarkCase, relevance_mode: str) -> list[str]:
+    if relevance_mode == "chunk_id":
+        return [f"chunk_id::{chunk_id}" for chunk_id in case.expected_chunk_ids if chunk_id]
+    if relevance_mode == "source_title":
+        return [f"source_title::{title}" for title in case.expected_source_titles if title]
+    return []
+
+
+def _normalize_ranked_relevance_ids(ranked_chunk_ids: Sequence[Any], relevance_mode: str) -> list[str]:
     normalized: list[str] = []
-    for item in ranked_chunk_ids:
-        chunk_id = _extract_chunk_id(item)
-        if chunk_id:
-            normalized.append(chunk_id)
+    for index, item in enumerate(ranked_chunk_ids):
+        if relevance_mode == "chunk_id":
+            normalized.append(_canonical_id("chunk_id", _extract_chunk_id(item), index))
+        elif relevance_mode == "source_title":
+            normalized.append(_canonical_id("source_title", _extract_title(item), index))
+        else:
+            normalized.append(f"__non_relevant__::{index}")
     return normalized
+
+
+def _canonical_id(namespace: str, value: str, index: int) -> str:
+    if value:
+        return f"{namespace}::{value}"
+    return f"__non_relevant__::{index}"
+
+
+def _extract_title(item: Any) -> str:
+    if isinstance(item, str):
+        return ""
+    if isinstance(item, Mapping):
+        return str(item.get("title") or "").strip()
+    title = getattr(item, "title", None)
+    if title is not None:
+        return str(title).strip()
+    return ""
 
 
 def _extract_chunk_id(item: Any) -> str:

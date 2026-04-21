@@ -152,6 +152,7 @@ class KbSearchRequest(BaseModel):
 
 class RetrievalDebug(BaseModel):
     query_analysis: Optional[QueryAnalysis] = None
+    analysis_scope: Optional[str] = None
 
     model_config = ConfigDict(extra="allow")
 

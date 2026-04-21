@@ -79,6 +79,7 @@ export interface RetrievalDebug {
   query_entities?: string[]
   expanded_entities?: string[]
   query_analysis?: QueryAnalysis
+  analysis_scope?: string
   dense_hits: RetrievalHit[]
   keyword_hits: RetrievalHit[]
   entity_hits: RetrievalHit[]

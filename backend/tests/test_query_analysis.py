@@ -103,7 +103,9 @@ def test_symbolic_query_suppresses_entity_branch_in_mix_mode(monkeypatch) -> Non
 
     assert result["hits"] == []
     assert result["debug"]["entity_count"] == 0
-    assert result["debug"]["query_analysis"] is None
+    assert result["debug"]["query_analysis"] is not None
+    assert result["debug"]["query_analysis"]["query_type"] == "symbolic"
+    assert result["debug"]["analysis_scope"] == "retrieval_query"
 
 
 def test_cache_hit_debug_uses_cold_path_rerank_semantics(monkeypatch) -> None:
@@ -178,4 +180,6 @@ def test_cache_hit_debug_uses_cold_path_rerank_semantics(monkeypatch) -> None:
     assert result["debug"]["cache_hit"] is True
     assert result["debug"]["rerank_effective_mode"] == "off"
     assert result["debug"]["rerank_status"] == "skipped"
-    assert result["debug"]["query_analysis"] is None
+    assert result["debug"]["query_analysis"] is not None
+    assert result["debug"]["query_analysis"]["query_type"] == "symbolic"
+    assert result["debug"]["analysis_scope"] == "retrieval_query"

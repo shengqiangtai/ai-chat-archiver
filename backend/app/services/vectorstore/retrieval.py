@@ -16,7 +16,7 @@ from app.core.config import (
     RETRIEVAL_TOP_K,
 )
 from app.db.sqlite import get_db
-from app.models.schemas import RetrievalHit
+from app.models.schemas import QueryAnalysis, RetrievalHit
 from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
 from app.services.ingest.entity_extractor import extract_query_entities, normalize_entity_name
@@ -62,6 +62,13 @@ def _effective_rerank_mode(*, use_rerank: bool, requested_mode: str) -> str:
     if requested_mode == "auto":
         return "auto"
     return "on"
+
+
+def _query_analysis_debug(query_analysis: QueryAnalysis) -> dict[str, object]:
+    return {
+        "query_analysis": asdict(query_analysis),
+        "analysis_scope": "retrieval_query",
+    }
 
 
 def retrieve(
@@ -238,7 +245,7 @@ def _retrieve_impl(
                 "entity_hits": [],
                 "candidate_hits": [],
                 "final_hits": [asdict(hit) for hit in hits],
-                "query_analysis": None,
+                **_query_analysis_debug(query_analysis),
             } if include_debug else {}
             logger.info("命中检索缓存: query=%r", user_query[:50])
             return hits, debug
@@ -463,7 +470,7 @@ def _retrieve_impl(
         "rerank_elapsed_ms": rerank_info["elapsed_ms"],
         "rerank_candidate_limit": rerank_info["candidate_limit"],
         "rerank_candidate_count": rerank_info["candidate_count"],
-        "query_analysis": None,
+        **_query_analysis_debug(query_analysis),
         "embed_time": round(t_embed, 3),
         "search_time": round(t_search, 3),
         "total_time": round(total_time, 3),

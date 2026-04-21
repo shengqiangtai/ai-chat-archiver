@@ -1,514 +1,804 @@
-# Lightweight RAG Design
+# Graph-Enhanced Lightweight RAG Design
 
 Date: 2026-04-21
 
 ## 1. Project Positioning
 
-This project is a lightweight, local-first RAG system for AI chat archives and Markdown documents.
+This project is a lightweight, local-first, graph-enhanced RAG system for AI chat histories and Markdown documents.
 
-It is not intended to become a heavy enterprise knowledge platform. The target positioning is:
+Its target positioning is not a generic knowledge base product. It is a resume-ready RAG engineering and retrieval optimization project for LLM application, search, and algorithm-oriented roles.
 
-- algorithm/retrieval-oriented RAG project
-- local retrieval with optional cloud generation
-- benchmark-driven optimization loop
-- strong focus on retrieval quality and answer trustworthiness
+The system should combine two qualities at the same time:
+
+- mature production-style RAG architecture
+- modern retrieval ideas inspired by systems such as LightRAG, RAGFlow, and hybrid retrieval frameworks
 
 The final external narrative should be:
 
-> A lightweight local RAG system for AI chat histories and Markdown documents, with an evaluation-driven optimization loop around hybrid retrieval, conditional rewrite, reranking, citations, and grounding checks to improve retrieval hit rate and answer trustworthiness.
+> Built a lightweight local-first RAG system for AI chat histories and Markdown documents, combining production-grade hybrid retrieval, conditional reranking, citations, and offline evaluation with a LightRAG-inspired dual-level graph-enhanced retrieval layer to improve retrieval accuracy and answer trustworthiness.
 
-## 2. Product Goal
+This project is explicitly designed to look mature enough for engineering discussion and advanced enough for algorithm and retrieval discussion.
 
-The project should prove two things:
+## 2. Core Product Goal
 
-1. Retrieval quality can be improved beyond baseline strategies in a stable, measurable way.
-2. Answers can become more trustworthy under citation and grounding constraints.
+The project must prove three things:
 
-Success is not defined by number of features or number of data sources. Success is defined by:
+1. The system improves retrieval quality over strong baselines in a measurable way.
+2. The system improves answer trustworthiness with citations and grounding constraints.
+3. The system introduces a graph-enhanced dual-level retrieval layer that provides additional gains on the right query types without turning the whole system into a heavy GraphRAG platform.
 
-- measurable retrieval gains on a fixed benchmark
-- lower unsupported answer rate
-- clear fallback behavior under local resource constraints
-- debug visibility for retrieval and answer-generation decisions
+Success is defined by:
 
-## 3. Data Scope
+- measurable gains on a fixed benchmark
+- a clean comparison between retrieval variants
+- explainable query routing and fallback behavior
+- conservative answer behavior when evidence is insufficient
+- a system architecture that is small enough to deploy locally but sophisticated enough to discuss in interviews
 
-The first-stage knowledge base only supports:
+## 3. Design Principles
 
-- AI chat records
+The design should follow these principles:
+
+- local-first, not cloud-dependent retrieval
+- strong default path before advanced path
+- graph enhancement as controlled augmentation, not heavy infrastructure
+- retrieval gains and answer trust gains measured separately
+- every expensive optimization must be gated
+- every intelligent behavior must be inspectable in debug output
+
+The project must not become:
+
+- a heavy multi-tenant SaaS
+- a full GraphRAG research platform
+- a complex agent workflow system
+- an ingestion breadth contest
+
+## 4. Scope
+
+### 4.1 Supported Data
+
+The first-stage knowledge base supports only:
+
+- AI chat histories
 - local Markdown documents
 
-This scope is intentionally fixed to keep the project focused on retrieval optimization rather than ingestion breadth.
+This scope is intentionally narrow so the project can go deep on retrieval quality, graph augmentation, evaluation, and answer grounding.
 
-The following are explicitly out of scope for the MVP:
+### 4.2 Explicit Non-Goals
+
+The following are out of scope for the MVP and near-term roadmap:
 
 - PDF parsing
 - web crawling
-- Notion or external SaaS connectors
-- multi-tenant data management
+- Notion and SaaS connectors
+- GraphRAG community detection and graph summarization
+- graph path reasoning agents
+- enterprise permissions
+- multi-tenant deployment
+- online learning and auto-tuning loops
+- heavyweight judge-model evaluation pipelines
 
-## 4. Runtime Strategy
+## 5. Runtime Strategy
 
-The default runtime strategy is:
+The runtime model should be:
 
-- local retrieval stack
-- optional cloud generation through an OpenAI-compatible API
+- local indexing
+- local keyword retrieval
+- local dense retrieval
+- local graph-enhanced retrieval signals
+- optional local or cloud answer generation through an OpenAI-compatible interface
 
-This means:
+The retrieval stack must remain usable without cloud generation.
 
-- indexing, metadata, keyword retrieval, dense retrieval, and most optimization logic remain local
-- answer generation can use either a local model or a cloud model, but the retrieval system must not depend on cloud access to function
+If generation is unavailable, the system should still return:
 
-If generation is unavailable, the system should still be able to return retrieved passages and sources.
+- retrieved passages
+- source references
+- debug explanations for why those passages were selected
 
-## 5. Architecture Overview
+## 6. System Narrative
 
-The architecture remains lightweight and close to the current codebase:
+The system should be described as a two-track retrieval architecture:
 
-- `FastAPI` for backend APIs
-- `SQLite` for metadata and FTS retrieval
+### 6.1 Mature Primary Track
+
+This is the always-available production-style path:
+
+- query analysis
+- hybrid candidate generation from keyword and vector retrieval
+- candidate fusion
+- optional reranking
+- context assembly
+- answer generation with citations
+- grounding checks
+
+This track is inspired by mature production RAG systems and should be the operational backbone of the project.
+
+### 6.2 Advanced Secondary Track
+
+This is the LightRAG-inspired graph-enhanced path:
+
+- entity and relation extraction during ingestion
+- graph-aware concept retrieval at query time
+- chunk-level retrieval in parallel
+- dual-level fusion between concept/entity-level signals and chunk-level evidence
+- automatic gating so graph retrieval only activates when likely to help
+
+This track exists to add a modern retrieval research flavor without breaking the lightweight deployment model.
+
+## 7. Final End-to-End Project Flow
+
+The final project flow should be:
+
+1. Parse AI chat histories and Markdown documents.
+2. Normalize text and preserve source metadata.
+3. Create bounded chunks using data-type-specific chunking.
+4. Extract entities and lightweight relations during ingestion.
+5. Write chunk metadata and FTS records into `SQLite`.
+6. Write embeddings into `Chroma`.
+7. Write entity and relation data into graph-friendly metadata tables in `SQLite`.
+8. Run query analysis to detect query type and route behavior.
+9. Generate baseline retrieval candidates from:
+   - keyword retrieval
+   - dense retrieval
+10. If the query is suitable, activate graph-enhanced retrieval to generate:
+   - entity-level candidates
+   - relation-neighborhood candidates
+11. Fuse all eligible candidates with explicit scoring and source attribution.
+12. Optionally rerank a bounded candidate set.
+13. Expand local context in a controlled way.
+14. Build answer context from top-ranked evidence.
+15. Generate an answer with citations.
+16. Run weak grounding checks on the answer.
+17. If support is weak, downgrade to a conservative response.
+18. Return answer, citations, retrieval path, rerank status, graph routing status, and grounding status.
+19. Evaluate all retrieval variants offline with benchmark tasks and report retrieval metrics separately from answer trust metrics.
+
+This flow is the final intended product behavior and the basis for implementation planning.
+
+## 8. Architecture Overview
+
+The architecture stays close to the current repository:
+
+- `FastAPI` backend
+- `SQLite` for metadata, FTS, and lightweight graph metadata storage
 - `Chroma` for dense vector retrieval
-- `React + Vite + TypeScript` for UI and debug surfaces
+- `React + Vite + TypeScript` frontend
 
-The system is divided into six logical layers:
+The system is divided into seven layers:
 
 1. `Ingestion Layer`
-   - parse AI chat records and Markdown documents
-   - normalize content
-   - chunk content
-   - extract metadata and entities
-   - support incremental indexing
-
 2. `Index Layer`
-   - store metadata and chunk records in `SQLite`
-   - store embeddings in `Chroma`
-   - preserve source linkage for later citations
+3. `Graph Layer`
+4. `Retrieval Layer`
+5. `Answer Layer`
+6. `Evaluation Layer`
+7. `Debug and Explain Layer`
 
-3. `Retrieval Layer`
-   - query analysis
-   - keyword retrieval
-   - vector retrieval
-   - optional entity expansion
-   - candidate fusion
-   - conditional rerank
+## 9. Ingestion Layer
 
-4. `Answer Layer`
-   - assemble context from retrieved chunks
-   - generate answers with citations
-   - perform weak grounding checks
-   - degrade to conservative answers when support is insufficient
+The ingestion layer is responsible for:
 
-5. `Evaluation Layer`
-   - load benchmark samples
-   - execute fixed retrieval strategies
-   - compute retrieval and answer-trust metrics
-   - export comparable experiment summaries
+- parsing AI chat histories
+- parsing Markdown documents
+- normalization and cleanup
+- data-type-aware chunking
+- metadata extraction
+- entity extraction
+- relation extraction
+- incremental indexing
 
-6. `Debug and Explain Layer`
-   - expose why a retrieval path was chosen
-   - show rewrite and rerank behavior
-   - display citation support and answer downgrade signals
+### 9.1 Chunking Strategy
 
-## 6. Core Retrieval Pipeline
+Chunking should differ by source type:
 
-The default retrieval pipeline should be:
+- AI chats should chunk by turn or tightly bounded adjacent turns
+- Markdown should chunk by headings, paragraphs, and local semantic blocks
 
-`query -> query analysis -> candidate generation -> rerank gating -> context expansion -> answer with citations -> grounding checks`
+The goal is to preserve retrieval precision while keeping context windows interpretable.
 
-### 6.1 Query Analysis
+### 9.2 Entity and Relation Extraction
 
-The system should classify queries with lightweight heuristics rather than heavy orchestration. At minimum it should distinguish:
+Entity extraction should identify:
 
-- factual lookup
-- file or command lookup
-- chat history recall
-- multi-fragment synthesis
-- pronoun or context-dependent query
-- time-reference query
-
-The purpose of query analysis is to decide:
-
-- whether rewrite should run
-- whether entity expansion should run
-- whether rerank should run
-
-### 6.2 Candidate Generation
-
-Candidate generation should combine:
-
-- `SQLite FTS` for exact keyword and symbolic matches
-- `Chroma` for semantic retrieval
-
-The system should keep `mix` as the primary default mode, with explicit fusion behavior:
-
-- keyword retrieval protects precise matches
-- dense retrieval extends recall
-- entity expansion is supplemental and must not dominate the ranking
-
-### 6.3 Rewrite Gating
-
-Rewrite is not a mandatory step. It should only run for high-value cases such as:
-
-- pronoun-heavy follow-up queries
-- time references that require clarification
-- context-dependent questions that likely under-specify the target
-
-Rewrite should be skipped for explicit queries involving:
-
-- filenames
+- file names
 - commands
 - model names
-- other precise symbolic tokens
+- project concepts
+- people, tools, libraries, and components when clearly present
 
-### 6.4 Rerank Gating
+Relation extraction should stay lightweight and practical. It is not a full knowledge graph pipeline.
 
-Reranking is a conditional enhancer, not a default dependency.
+Useful relation examples:
 
-It should run only when:
+- component depends on component
+- file belongs to module
+- model used for task
+- command associated with tool
+- concept mentioned with concept
 
-- the candidate set is limited
-- the query is ambiguous enough to justify reranking cost
-- the reranker is available within configured time budget
+The relation layer exists to support retrieval augmentation, not symbolic reasoning.
 
-If rerank fails or times out, the system should immediately fall back to the original candidate order.
+## 10. Index Layer
 
-### 6.5 Context Expansion
+The index layer should keep three classes of retrievable state:
 
-Context expansion should be data-type aware:
+### 10.1 Chunk Index
 
-- chat records expand through adjacent turns with tight limits
-- Markdown expands through local chunk neighborhood or same-document local context
+Stored in `SQLite` and `Chroma`:
 
-Expansion must stay bounded to avoid irrelevant context pollution.
+- chunk id
+- source id
+- source type
+- source path
+- chunk text
+- normalized text
+- chunk order
+- local neighborhood references
 
-## 7. Answering and Trustworthiness
+### 10.2 Dense Index
 
-The answer layer must stay grounded in retrieved evidence.
+Stored in `Chroma`:
 
-### 7.1 Citation Rules
+- embedding vector
+- chunk id mapping
+- retrieval metadata
 
-Answers should not be treated as successful outputs unless they include source references when evidence is available.
+### 10.3 Graph Metadata Index
 
-The system should:
+Stored in `SQLite`:
 
-- keep source linkage from chunks to original files or chat records
-- attach citations to answer segments
-- expose citation details in both API responses and the UI
+- entity table
+- relation table
+- chunk-to-entity links
+- entity-to-entity links
+- source-level graph references
 
-### 7.2 Weak Grounding Checks
+This graph metadata store should remain lightweight and local. No separate graph database is required for the MVP.
 
-The first-stage grounding design is intentionally lightweight.
+## 11. Retrieval Architecture
 
-The system should check:
+The retrieval architecture has a default path and an advanced path.
 
-- whether an answer includes source-backed statements
-- whether key claims have at least weak textual support in the cited chunks
-- whether the answer is overconfident relative to the available evidence
+## 11.1 Default Retrieval Path
 
-If support is insufficient, the answer should degrade to a conservative response rather than fabricate certainty.
+The default retrieval path is:
 
-### 7.3 Conservative Degradation
+`query -> query analysis -> keyword retrieval + dense retrieval -> fusion -> rerank gating -> context expansion`
 
-When grounding support is weak, the system should:
+This path should always be available and must deliver strong baseline performance.
 
-- state uncertainty clearly
-- point the user to relevant retrieved passages
-- avoid strong unsupported conclusions
+## 11.2 Graph-Enhanced Retrieval Path
 
-The default bias is: answer less, but answer with support.
+The graph-enhanced path is:
 
-## 8. Evaluation Framework
+`query -> query analysis -> entity detection -> concept-level retrieval -> relation-neighborhood expansion -> dual-level fusion with chunk retrieval`
 
-The evaluation system is the core of the project narrative.
+This path should not replace the default path. It should augment it.
 
-### 8.1 Evaluation Goals
+## 11.3 Automatic Graph Gating
 
-The project evaluates two layers separately:
+Graph-enhanced retrieval should only activate when query analysis predicts likely benefit.
 
-1. retrieval quality
-2. answer trustworthiness
+Candidate trigger cases:
 
-These must not be mixed into a single vague "quality" number.
+- entity-centric questions
+- multi-hop concept queries
+- component relationship questions
+- underspecified queries where keyword and dense signals alone are often weak
+- chat or document questions that refer to named concepts with strong graph anchors
 
-### 8.2 Benchmark Dataset
+Graph-enhanced retrieval should be skipped for:
 
-The benchmark dataset should be small, curated, and manually checkable.
+- direct file lookup
+- exact command lookup
+- short symbolic queries
+- situations where baseline retrieval is already highly confident
 
-Each sample should include:
+## 12. Query Analysis
+
+Query analysis is the control plane for the entire system.
+
+It should classify or score queries along these dimensions:
+
+- exact symbolic query vs semantic query
+- entity-centric vs chunk-centric
+- single-hop vs relation-seeking
+- context-dependent vs self-contained
+- rerank-worthy vs straightforward
+- rewrite-worthy vs rewrite-harmful
+- graph-worthy vs graph-unnecessary
+
+This analysis can begin with rules and heuristics. A small learned router can be added later only if benchmark evidence justifies it.
+
+## 13. Candidate Generation
+
+Candidate generation should be explicitly multi-source.
+
+### 13.1 Baseline Candidate Sources
+
+- `SQLite FTS`
+- `Chroma dense retrieval`
+- optional entity lookup for exact known entities
+
+### 13.2 Graph Candidate Sources
+
+- entity-level hits
+- relation-neighborhood expansions
+- chunk candidates linked to top-ranked entities
+- source-level concept anchors
+
+Every candidate should carry provenance:
+
+- retrieval source
+- raw score
+- normalized score
+- graph path or entity linkage if applicable
+
+## 14. Fusion Strategy
+
+Fusion should be an explicit subsystem, not an opaque detail.
+
+The system should support:
+
+- keyword contribution
+- dense contribution
+- graph contribution
+- optional rerank score override
+
+The first fusion implementation should be simple, inspectable, and benchmarkable.
+
+Recommended first-stage design:
+
+- normalize scores by retriever family
+- assign source-aware weights
+- cap graph contribution so graph retrieval augments rather than dominates
+- preserve exact-match protection for symbolic queries
+
+Potential later enhancement:
+
+- RRF-style rank fusion
+- query-type-aware weight presets
+
+## 15. Dual-Level Retrieval Design
+
+This is the core advanced feature of the project.
+
+The project should retrieve at two levels:
+
+### 15.1 Concept or Entity Level
+
+The system retrieves:
+
+- relevant entities
+- related concepts
+- relation-neighborhood signals
+
+This level is useful for questions about components, relationships, tools, or named concepts.
+
+### 15.2 Chunk Level
+
+The system retrieves:
+
+- textual evidence chunks
+- local context windows
+- directly answerable passages
+
+This level is required for answer generation and citation.
+
+### 15.3 Dual-Level Fusion
+
+Entity-level signals should help:
+
+- recall the right chunk neighborhood
+- rescue semantically relevant but textually weak chunk matches
+- improve ranking for relationship-style questions
+
+Chunk-level evidence should still dominate final answer grounding.
+
+The graph layer points the system toward evidence. It does not replace textual evidence.
+
+## 16. Rewrite Strategy
+
+Query rewrite remains conditional.
+
+Rewrite should run only when likely beneficial:
+
+- pronoun-heavy follow-up questions
+- unresolved time-reference questions
+- underspecified semantic questions
+
+Rewrite should be skipped for:
+
+- file names
+- commands
+- model names
+- clearly exact symbolic queries
+
+Rewrite is an enhancement, not a required stage.
+
+## 17. Rerank Strategy
+
+Reranking should remain bounded and selective.
+
+The reranker should operate after fusion on a limited candidate set.
+
+Rerank should be activated only when:
+
+- the query is ambiguous enough
+- the candidate set is small enough
+- the latency budget allows it
+
+Rerank should never become the only reason the system works.
+
+If rerank fails or times out:
+
+- keep the pre-rerank ordering
+- record the fallback in debug output
+
+## 18. Context Expansion
+
+Context expansion should be conservative and source-aware.
+
+For AI chats:
+
+- expand by adjacent turns
+- keep expansion bounded
+- preserve conversational chronology
+
+For Markdown:
+
+- expand within the same local section
+- preserve heading structure when useful
+- avoid document-wide spillover
+
+Graph-level neighbors must not be blindly appended to answer context. Only textual evidence selected after ranking should enter final answer context.
+
+## 19. Answer Layer
+
+The answer layer is responsible for:
+
+- answer context construction
+- prompt building
+- citation generation
+- answer generation
+- grounding checks
+- conservative downgrade behavior
+
+### 19.1 Citation Requirements
+
+Every successful answer should expose:
+
+- cited chunks
+- source file or chat reference
+- chunk-level evidence links
+
+The answer layer should treat uncited strong claims as suspicious by default.
+
+### 19.2 Grounding Checks
+
+The first-stage grounding system should stay lightweight and deterministic enough to benchmark.
+
+It should check:
+
+- whether answer claims have supporting cited chunks
+- whether cited chunks weakly support the answer
+- whether the answer is stronger than the evidence warrants
+
+### 19.3 Conservative Downgrade
+
+If support is insufficient, the system should:
+
+- reduce certainty
+- explicitly say evidence is limited
+- point to the best supporting passages
+- avoid unsupported synthesis
+
+## 20. Failure Handling and Fallbacks
+
+The system must be robust under local constraints.
+
+### 20.1 Retrieval Fallbacks
+
+- if dense retrieval fails, fall back to keyword retrieval
+- if graph retrieval fails, continue with baseline hybrid retrieval
+- if entity extraction is noisy, graph contribution stays capped
+- if rewrite fails, keep the original query
+- if rerank fails, keep fused ordering
+
+### 20.2 Generation Fallbacks
+
+- if answer generation fails, return retrieved evidence and citations
+- if grounding fails, prefer conservative response over confident synthesis
+
+### 20.3 Design Rule
+
+No advanced feature may become a single point of failure.
+
+The ordering of reliability should be:
+
+`hybrid retrieval > graph enhancement > rerank > generation polish`
+
+## 21. Evaluation Framework
+
+The evaluation framework is the backbone of the project narrative.
+
+It must separately evaluate:
+
+- retrieval quality
+- answer trustworthiness
+- graph-enhanced retrieval gains on the right query types
+
+## 21.1 Benchmark Dataset
+
+The benchmark should be curated, manually checkable, and typed.
+
+Each benchmark sample should include:
 
 - `question`
-- `expected_source_ids` or expected chunk identifiers
+- `expected_chunk_ids` or equivalent source ids
 - `question_type`
 - `difficulty`
-- optional notes for edge cases
+- `source_type`
+- `requires_relation_reasoning` flag
+- `requires_context_resolution` flag
+- optional notes
 
-The first benchmark version should cover:
+The benchmark should cover:
 
-- exact fact lookup
-- multi-turn chat recall
+- exact lookup
+- semantic retrieval
+- chat recall
 - multi-fragment synthesis
-- filename or command lookup
-- pronoun or omitted-reference queries
-- time-reference queries
+- entity-centric lookup
+- relation-style questions
+- pronoun follow-up questions
+- time-reference questions
 
-### 8.3 Retrieval Metrics
+## 21.2 Retrieval Metrics
 
-The first-stage retrieval metrics should stay minimal and hard:
-
-- `Recall@K`
-- `MRR`
-- `HitRate@K`
-
-Priority metrics:
+First-stage core metrics:
 
 - `Recall@5`
+- `Recall@10`
 - `MRR@10`
+- `HitRate@5`
 
-`nDCG@K` can be added later if graded relevance labels become available.
+Optional later metrics:
 
-### 8.4 Answer Trustworthiness Metrics
+- `nDCG@K`
+- per-query-type win rate
 
-The first-stage trustworthiness metrics should be lightweight and reproducible:
+## 21.3 Trustworthiness Metrics
+
+First-stage trust metrics:
 
 - `citation_coverage`
 - `source_support_rate`
 - `unsupported_answer_rate`
 - `abstain_rate`
 
-These metrics are designed to show that the system is less likely to produce unsupported answers.
+## 21.4 Graph Retrieval Metrics
 
-### 8.5 Experimental Comparisons
+Because graph enhancement is a headline feature, it needs targeted evaluation.
 
-The benchmark should compare at least these strategies:
+The system should report:
+
+- graph-gated query count
+- graph-path retrieval win rate over baseline
+- query-type-specific gain for entity and relation questions
+- graph activation false-positive rate
+
+This is necessary to prove the graph layer is useful rather than decorative.
+
+## 21.5 Experimental Baselines
+
+The benchmark should compare at least:
 
 - `keyword`
 - `vector`
 - `hybrid`
-- `mix`
-- `mix + rerank`
-- `mix + rewrite gating`
-- `mix + rewrite gating + rerank`
-- `mix + rerank + grounding checks`
+- `hybrid + rerank`
+- `hybrid + rewrite gating`
+- `hybrid + graph gating`
+- `hybrid + graph gating + rerank`
+- `hybrid + graph gating + rerank + grounding`
 
-Important boundary:
+Important evaluation rule:
 
-- rewrite and rerank may affect retrieval quality
-- grounding checks affect answer trustworthiness and must not be misrepresented as retrieval gains
+- graph routing and reranking affect retrieval
+- grounding affects answer trustworthiness
+- results must be reported separately
 
-### 8.6 Outputs
+## 22. Debug and Explainability
 
-Evaluation outputs should include:
+The frontend and API should make retrieval decisions inspectable.
 
-- CLI benchmark summary
-- structured machine-readable results
-- Markdown experiment summary for docs
-- per-query debug visibility in the UI
+Every query response should ideally expose:
 
-## 9. Module Boundaries and Code Evolution
+- query type
+- rewrite status
+- graph gating status
+- retriever contributions
+- fusion summary
+- rerank status
+- grounding status
+- fallback status
 
-This project should evolve by clarifying boundaries rather than performing a broad rewrite.
+For graph-enhanced queries, debug should also show:
 
-### 9.1 Existing Core Boundaries to Preserve
+- triggered entities
+- relation-neighborhood usage
+- whether graph retrieval changed final top results
 
-- `ingest`
-  - loading, normalization, chunking, metadata extraction, incremental indexing
-- `embedding`
-  - embedding interface and model adapters
-- `vectorstore/retrieval`
-  - candidate generation and fusion
-- `rerank`
-  - rerank execution and fallback behavior
-- `qa`
-  - rewrite, prompt context, citations, grounding checks, answer generation
+This is a major maturity signal for interviews and demos.
 
-### 9.2 New or Strengthened Boundaries
+## 23. Module Boundaries
 
-The following boundaries should be introduced or made more explicit:
+The project should evolve by clarifying module boundaries rather than rewriting the repository from scratch.
 
-- `backend/app/services/evaluation/`
-  - benchmark loading
-  - experiment execution
-  - metrics
-  - result reporting
+### 23.1 Existing Modules to Preserve
+
+- `backend/app/services/ingest/`
+- `backend/app/services/embedding/`
+- `backend/app/services/vectorstore/`
+- `backend/app/services/rerank/`
+- `backend/app/services/qa/`
+
+### 23.2 New or Strengthened Modules
+
+The design should add or clarify:
 
 - `backend/app/services/retrieval/query_analysis.py`
   - query typing
+  - graph gating
   - rewrite gating
-  - entity expansion gating
-  - rerank gating decisions
+  - rerank gating
+
+- `backend/app/services/retrieval/fusion.py`
+  - cross-source candidate fusion
+  - normalized scoring
+  - provenance preservation
+
+- `backend/app/services/graph/`
+  - entity extraction adapters if needed
+  - relation extraction
+  - graph candidate generation
+  - neighborhood expansion
 
 - `backend/app/services/qa/grounding.py`
-  - weak support checks
+  - grounding checks
+  - unsupported answer detection
   - conservative downgrade logic
 
-- `backend/app/services/evaluation/reporting.py`
-  - CLI and Markdown-friendly summaries
+- `backend/app/services/evaluation/`
+  - benchmark loading
+  - metrics
+  - experiment runners
+  - reporting
 
-### 9.3 Frontend Responsibility
+## 24. MVP Definition
 
-The frontend should stay focused on explainability, not orchestration.
+The MVP should deliver:
 
-It should show:
-
-- whether rewrite was applied, skipped, or failed
-- whether rerank was applied, skipped, timed out, or failed
-- which candidates came from keyword, vector, or entity paths
-- whether answer downgrade happened
-- how citations map back to sources
-
-## 10. Failure Handling and Performance Constraints
-
-The system must degrade gracefully under local resource constraints.
-
-### 10.1 Failure Handling
-
-- if dense retrieval is unavailable, fall back to keyword retrieval
-- if rewrite fails, keep the original query
-- if rerank fails or times out, keep original candidate order
-- if generation fails, return retrieved passages and citations when possible
-- if entity expansion is noisy, keep it supplemental and bounded
-
-No enhancement layer should become a single point of failure.
-
-### 10.2 Performance Constraints
-
-The project should explicitly optimize for ordinary personal hardware.
-
-The design constraints are:
-
-- rerank only on limited candidate sets
-- rewrite only for high-value cases
-- no heavy multi-agent reasoning pipeline
-- incremental indexing preferred over full rebuilds
-- benchmark runs must remain practical on a personal machine
-
-### 10.3 Logging and Explainability
-
-All degradations should be visible:
-
-- backend logs should record the reason
-- debug responses should expose the actual path taken
-
-The system should avoid silent fallback behavior.
-
-## 11. MVP Scope
-
-The MVP includes:
-
-- AI chat record ingestion
-- Markdown ingestion
-- incremental indexing
-- keyword retrieval
-- vector retrieval
-- `mix` retrieval
-- conditional rewrite
-- conditional rerank
-- citation generation
+- local ingestion for AI chats and Markdown
+- chunk-level and entity-level indexing
+- hybrid retrieval as the stable default
+- automatic graph gating
+- dual-level graph-enhanced retrieval
+- bounded reranking
+- citations
 - weak grounding checks
-- benchmark dataset and evaluation script
-- debug visibility for retrieval and downgrade decisions
+- benchmark-based evaluation
+- debug visibility for all major retrieval decisions
 
-The MVP explicitly excludes:
+This MVP is intentionally more advanced than a basic RAG demo, but still bounded enough for a single coherent implementation plan.
 
-- PDF support
-- web data ingestion
-- agent workflows
-- GraphRAG
-- heavy claim verification
-- enterprise auth or permissions
-- feature expansion unrelated to retrieval optimization
+## 25. Delivery Phases
 
-## 12. Delivery Phases
+### Phase 1: Evaluation Backbone
 
-### Phase 1: Fix the Evaluation Baseline
+Deliver:
 
-Primary outputs:
+- benchmark schema
+- first typed benchmark set
+- baseline evaluation runner
+- retrieval metrics
+- trust metrics
 
-- benchmark schema definition
-- first curated benchmark set
-- stable baseline comparisons
-- retrieval metric outputs
-- first trustworthiness metric outputs
+This phase fixes the measurement problem first.
 
-This phase creates the measurement backbone for the entire project.
+### Phase 2: Mature Retrieval Backbone
 
-### Phase 2: Retrieval Optimization
+Deliver:
 
-Priority work:
+- stronger hybrid retrieval baseline
+- explicit query analysis
+- explicit fusion logic
+- bounded rerank logic
+- improved debug explainability
 
-- explicit query analysis and rewrite gating
-- cleaner `mix` fusion behavior
-- rerank gating and fallback behavior
-- bounded context expansion
-- stronger debug explainability
+This phase creates the mature primary path.
 
-This phase should produce measurable improvements against the fixed benchmark.
+### Phase 3: Graph-Enhanced Retrieval
 
-### Phase 3: Answer Trustworthiness
+Deliver:
 
-Priority work:
+- entity and relation extraction
+- graph metadata storage in `SQLite`
+- graph candidate generation
+- automatic graph gating
+- dual-level fusion between graph and chunk retrieval
+- graph-specific benchmark reporting
+
+This phase creates the advanced retrieval differentiation.
+
+### Phase 4: Trustworthy Answering
+
+Deliver:
 
 - citation coverage checks
-- weak source support checks
-- unsupported answer downgrades
-- frontend support-state visibility
+- grounding checks
+- conservative downgrade behavior
+- richer answer/debug output
 
-This phase should reduce unsupported answers without introducing heavy verification infrastructure.
+This phase turns strong retrieval into trustworthy QA behavior.
 
-## 13. Resume and Demo Narrative
+## 26. Resume Narrative
 
-The project should be explainable in one sentence:
+The project should support resume bullets like:
 
-> Built a lightweight local RAG system for AI chat histories and Markdown documents, and established an evaluation-driven optimization loop around hybrid retrieval, reranking, citations, and grounding checks to improve retrieval accuracy and answer trustworthiness.
+- Designed and implemented a lightweight local-first RAG system for AI chat histories and Markdown documents, combining hybrid retrieval, conditional reranking, citations, and offline evaluation.
+- Built a LightRAG-inspired dual-level graph-enhanced retrieval layer with automatic query gating, using lightweight entity and relation metadata to improve recall for entity-centric and relationship-style questions.
+- Established an offline benchmark framework with metrics such as `Recall@K`, `MRR`, citation coverage, and unsupported answer rate to evaluate retrieval gains and answer trustworthiness separately.
 
-Representative resume bullets:
+## 27. Interview Narrative
 
-- Designed and implemented a lightweight local RAG system supporting incremental indexing, hybrid retrieval, and citation-based QA for AI chat histories and Markdown documents.
-- Built an offline benchmark and retrieval evaluation framework using metrics such as `Recall@K` and `MRR` to compare keyword, vector, hybrid, rewrite, and rerank strategies.
-- Improved answer trustworthiness through conditional query rewrite, bounded reranking, citation coverage, and grounding checks that reduce unsupported responses.
+The project should be discussable from two angles.
 
-## 14. Risks and Open Questions
+### 27.1 Engineering Angle
 
-### 14.1 Main Risks
+- why hybrid retrieval is the stable default
+- why graph enhancement is gated
+- how fallback behavior preserves reliability
+- how debug signals make the system observable
 
-- benchmark size may be too small to make results convincing
-- retrieval gains may be confused with answer-layer safeguards
-- rewrite may hurt exact symbolic queries
-- rerank may cost more than it helps on some query types
-- grounding rules may become too strict and over-suppress answers
+### 27.2 Algorithm and Retrieval Angle
 
-### 14.2 Open Questions
+- why dual-level retrieval helps on entity and relation queries
+- why graph signals must not dominate textual evidence
+- how evaluation isolates graph gains from generic hybrid gains
+- how routing and fusion trade off recall, precision, and latency
 
-- what is the right initial benchmark size for credible but fast iteration
-- whether Markdown and chat data should use different chunk strategies from the first implementation
-- whether answer trustworthiness should remain binary or evolve into a small support-level scale
-- how broad the first OpenAI-compatible generation interface should be
+## 28. Risks and Open Questions
 
-These questions affect implementation details but do not block the architecture.
+### 28.1 Main Risks
 
-## 15. Explicit Non-Goals
+- graph enhancement may add complexity without enough benchmark gain
+- entity or relation extraction may be noisy on real chat data
+- graph gating may misfire and waste latency on easy queries
+- rerank and graph gains may overlap and become hard to interpret
+- grounding rules may become too strict
 
-This project will not optimize for:
+### 28.2 Open Questions
 
-- enterprise deployment
-- multi-tenant SaaS behavior
-- broad connector coverage
-- graph-based retrieval
-- autonomous agent systems
-- heavy online learning or auto-tuning
-- heavyweight judge-model evaluation
-- infrastructure complexity added for appearance rather than value
+- whether relation extraction should remain rule-based or become partially model-assisted
+- whether graph fusion should use weighted scores or rank-based fusion first
+- how large the first benchmark should be for credible per-query-type analysis
+- whether a small learned query router is worth adding later
 
-## 16. Final Design Summary
+These questions should be resolved by benchmark evidence, not intuition.
 
-The project should remain a small, local-first RAG system, but become a stronger algorithm/retrieval case study by adding:
+## 29. Final Summary
 
-- a fixed offline benchmark
-- explicit retrieval decision logic
-- measurable retrieval comparisons
-- citation-aware answering
-- lightweight grounding checks
-- graceful fallback behavior
-- strong debug explainability
+The final intended system is:
 
-That combination is what turns the codebase from a useful local tool into a resume-ready RAG optimization project.
+- a lightweight local-first RAG project
+- with a mature hybrid retrieval backbone
+- with a LightRAG-inspired dual-level graph-enhanced retrieval layer
+- with automatic graph gating
+- with bounded reranking
+- with citation-aware and grounding-aware answering
+- with an evaluation framework that proves where gains come from
+
+That combination is what makes the project both mature and forward-looking enough for LLM application, search, and algorithm-oriented resume positioning.

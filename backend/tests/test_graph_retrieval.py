@@ -345,7 +345,7 @@ def test_graph_mode_override_off_skips_graph_for_relation_query(monkeypatch) -> 
     assert result["debug"]["graph_hit_count"] == 0
 
 
-def test_graph_mode_override_on_forces_graph_for_symbolic_query(monkeypatch) -> None:
+def test_graph_mode_on_does_not_force_symbolic_query_into_graph(monkeypatch) -> None:
     class DummyEmbedder:
         def encode_query(self, query: str) -> list[float]:
             return [0.0]
@@ -378,25 +378,11 @@ def test_graph_mode_override_on_forces_graph_for_symbolic_query(monkeypatch) -> 
     monkeypatch.setattr(retrieval_module, "get_store", lambda: DummyStore())
     monkeypatch.setattr(retrieval_module, "get_db", lambda: DummyDB())
     monkeypatch.setattr(retrieval_module, "get_cache", lambda: DummyCache())
-    monkeypatch.setattr(
-        retrieval_module,
-        "retrieve_graph_candidates",
-        lambda *args, **kwargs: [
-            retrieval_module.RetrievalHit(
-                chunk_id="graph-symbolic",
-                doc_id="doc-graph",
-                score=0.0,
-                rerank_score=None,
-                platform="ChatGPT",
-                title="Graph Symbolic",
-                excerpt="symbolic graph hit",
-                path="graph.md",
-                created_at="2026-04-21",
-                entity_score=2.0,
-                entity_names=["pipeline.py"],
-            )
-        ],
-    )
+
+    def _unexpected_graph_call(*args, **kwargs):
+        raise AssertionError("symbolic query must stay graph-disabled even when graph_mode=on")
+
+    monkeypatch.setattr(retrieval_module, "retrieve_graph_candidates", _unexpected_graph_call)
 
     result = retrieval_module.retrieve_debug(
         query="backend/app/services/qa/pipeline.py",
@@ -410,9 +396,9 @@ def test_graph_mode_override_on_forces_graph_for_symbolic_query(monkeypatch) -> 
     )
 
     assert result["debug"]["query_analysis"]["enable_graph"] is False
-    assert result["debug"]["graph_routed"] is True
-    assert result["debug"]["graph_hit_count"] == 1
-    assert result["hits"][0]["chunk_id"] == "graph-symbolic"
+    assert result["debug"]["graph_routed"] is False
+    assert result["debug"]["graph_hit_count"] == 0
+    assert result["debug"]["graph_hits"] == []
 
 
 def test_debug_exposes_graph_routing_state_and_hits(monkeypatch) -> None:

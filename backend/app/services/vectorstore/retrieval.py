@@ -67,8 +67,6 @@ def _effective_rerank_mode(*, use_rerank: bool, requested_mode: str) -> str:
 def _effective_graph_mode(*, requested_mode: str, query_analysis: QueryAnalysis) -> str:
     if requested_mode == "off":
         return "off"
-    if requested_mode == "on":
-        return "on"
     return "on" if query_analysis.enable_graph else "off"
 
 
@@ -211,7 +209,7 @@ def _retrieve_impl(
     if requested_rerank_mode not in {"auto", "off", "on"}:
         requested_rerank_mode = DEFAULT_RERANK_MODE
     requested_graph_mode = (graph_mode or "auto").strip().lower()
-    if requested_graph_mode not in {"auto", "off", "on"}:
+    if requested_graph_mode not in {"auto", "off"}:
         requested_graph_mode = "auto"
     query_analysis = analyze_query(user_query)
     effective_use_rerank = use_rerank and query_analysis.enable_rerank

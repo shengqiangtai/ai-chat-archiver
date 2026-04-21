@@ -1,5 +1,5 @@
 export type RerankMode = 'auto' | 'off' | 'on'
-export type GraphMode = 'auto' | 'off' | 'on'
+export type GraphMode = 'auto' | 'off'
 
 export interface RetrievalHit {
   chunk_id: string

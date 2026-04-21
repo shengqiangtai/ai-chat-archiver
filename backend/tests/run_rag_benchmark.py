@@ -51,8 +51,8 @@ MODES = [
     ModeConfig(name="hybrid", retrieval_mode="hybrid", rerank_mode="off", graph_mode="off"),
     ModeConfig(name="entity", retrieval_mode="entity", rerank_mode="off", graph_mode="auto"),
     ModeConfig(name="mix", retrieval_mode="mix", rerank_mode="off", graph_mode="off"),
-    ModeConfig(name="mix_graph", retrieval_mode="mix", rerank_mode="off", graph_mode="on"),
-    ModeConfig(name="mix_rerank", retrieval_mode="mix", rerank_mode="on", graph_mode="on"),
+    ModeConfig(name="mix_graph", retrieval_mode="mix", rerank_mode="off", graph_mode="auto"),
+    ModeConfig(name="mix_rerank", retrieval_mode="mix", rerank_mode="on", graph_mode="auto"),
 ]
 
 

@@ -2,7 +2,7 @@
 
 用途：
 - 对固定问题集批量调用 `/api/kb/search`
-- 对比 `vector / hybrid / entity / mix / mix+rerank`
+- 对比 `vector / hybrid / entity / mix / mix_graph / mix+rerank`
 - 输出每种模式的 Recall@5、HitRate@5、Recall@10、MRR@10 和平均耗时
 
 默认基准集基于当前仓库里真实归档过的一条聊天：
@@ -50,6 +50,7 @@ MODES = [
     ModeConfig(name="hybrid", retrieval_mode="hybrid", rerank_mode="off"),
     ModeConfig(name="entity", retrieval_mode="entity", rerank_mode="off"),
     ModeConfig(name="mix", retrieval_mode="mix", rerank_mode="off"),
+    ModeConfig(name="mix_graph", retrieval_mode="mix", rerank_mode="off"),
     ModeConfig(name="mix_rerank", retrieval_mode="mix", rerank_mode="on"),
 ]
 
@@ -139,6 +140,8 @@ def run_mode(
 ) -> dict[str, Any]:
     case_results = []
     errors: list[str] = []
+    graph_routed_cases = 0
+    graph_hit_total = 0
 
     for case in cases:
         payload = {
@@ -156,6 +159,10 @@ def run_mode(
             else:
                 response = run_local_search(payload)
             ranked_hits = response.get("hits") or []
+            debug = response.get("debug") or {}
+            if debug.get("graph_routed"):
+                graph_routed_cases += 1
+            graph_hit_total += int(debug.get("graph_hit_count") or 0)
             elapsed_seconds = ((response.get("debug") or {}).get("total_time"))
             if elapsed_seconds is None:
                 elapsed_seconds = round(time.monotonic() - started_at, 3)
@@ -175,6 +182,8 @@ def run_mode(
         {
             "retrieval_mode": mode.retrieval_mode,
             "rerank_mode": mode.rerank_mode,
+            "graph_routed_cases": graph_routed_cases,
+            "avg_graph_hits": round(graph_hit_total / len(cases), 3) if cases else 0.0,
             "errors": errors,
         }
     )
@@ -183,8 +192,8 @@ def run_mode(
 
 def format_summary(results: list[dict[str, Any]]) -> str:
     lines = [
-        "mode         recall@5  hit@5    recall@10  mrr@10   avg-seconds  evaluated/total  failed",
-        "-----------  --------  -------  ---------  -------  -----------  ---------------  ------",
+        "mode         recall@5  hit@5    recall@10  mrr@10   avg-seconds  graph-routed  avg-graph-hits  evaluated/total  failed",
+        "-----------  --------  -------  ---------  -------  -----------  ------------  --------------  ---------------  ------",
     ]
     for item in results:
         lines.append(
@@ -194,6 +203,8 @@ def format_summary(results: list[dict[str, Any]]) -> str:
             f"{item['recall_at_10']:<9.3f}  "
             f"{item['mrr_at_10']:<7.3f}  "
             f"{(item['avg_elapsed_seconds'] if item['avg_elapsed_seconds'] is not None else '-'):>11}  "
+            f"{item['graph_routed_cases']:>12}  "
+            f"{item['avg_graph_hits']:>14}  "
             f"{item['evaluated_cases']}/{item['total_cases']:<13}  "
             f"{item['failed_cases']}"
         )

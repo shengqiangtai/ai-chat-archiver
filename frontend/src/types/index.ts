@@ -56,6 +56,9 @@ export interface RetrievalDebug {
   dense_count: number | null
   keyword_count: number | null
   entity_count: number | null
+  graph_routed: boolean
+  graph_hit_count: number
+  graph_hits: RetrievalHit[]
   candidate_count: number
   final_count: number
   embed_time?: number

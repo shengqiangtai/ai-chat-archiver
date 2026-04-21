@@ -155,6 +155,9 @@ class KbSearchRequest(BaseModel):
 class RetrievalDebug(BaseModel):
     query_analysis: Optional[QueryAnalysis] = None
     analysis_scope: Optional[str] = None
+    graph_routed: bool = False
+    graph_hit_count: int = 0
+    graph_hits: List[Dict[str, Any]] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="allow")
 

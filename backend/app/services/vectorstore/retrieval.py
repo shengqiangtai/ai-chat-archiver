@@ -17,6 +17,7 @@ from app.core.config import (
 )
 from app.db.sqlite import get_db
 from app.models.schemas import QueryAnalysis, RetrievalHit
+from app.services.graph.retrieval import retrieve_graph_candidates
 from app.services.retrieval.fusion import fuse_candidates
 from app.services.cache.query_cache import get_cache
 from app.services.embedding.embedder import get_embedder
@@ -67,6 +68,14 @@ def _query_analysis_debug(query_analysis: QueryAnalysis) -> dict[str, object]:
     return {
         "query_analysis": asdict(query_analysis),
         "analysis_scope": "retrieval_query",
+    }
+
+
+def _graph_debug(*, graph_routed: bool, graph_hits: list[RetrievalHit]) -> dict[str, object]:
+    return {
+        "graph_routed": graph_routed,
+        "graph_hit_count": len(graph_hits),
+        "graph_hits": [asdict(hit) for hit in graph_hits[:5]],
     }
 
 
@@ -244,6 +253,7 @@ def _retrieve_impl(
                 "entity_hits": [],
                 "candidate_hits": [],
                 "final_hits": [asdict(hit) for hit in hits],
+                **_graph_debug(graph_routed=False, graph_hits=[]),
                 **_query_analysis_debug(query_analysis),
             } if include_debug else {}
             logger.info("命中检索缓存: query=%r", user_query[:50])
@@ -253,6 +263,7 @@ def _retrieve_impl(
     dense_hits: list[RetrievalHit] = []
     keyword_hits: list[RetrievalHit] = []
     entity_hits: list[RetrievalHit] = []
+    graph_hits: list[RetrievalHit] = []
     query_entities: list[str] = []
     expanded_entities: list[str] = []
     t_embed = 0.0
@@ -325,6 +336,16 @@ def _retrieve_impl(
             limit=max(top_k, RETRIEVAL_TOP_K),
         )
         entity_hits = [_row_to_hit(row) for row in entity_rows]
+        graph_hits = retrieve_graph_candidates(
+            user_query,
+            top_k=max(top_k, RETRIEVAL_TOP_K),
+            platform_filter=platform_filter,
+            model_filter=model_filter,
+            tag_filter=tag_filter,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        entity_hits.extend(graph_hits)
 
     t_search = time.time() - t0 - t_embed
     candidates = fuse_candidates(dense_hits, keyword_hits, entity_hits, retrieval_mode)
@@ -458,6 +479,10 @@ def _retrieve_impl(
         "final_count": len(filtered),
         "query_entities": query_entities,
         "expanded_entities": expanded_entities,
+        **_graph_debug(
+            graph_routed=retrieval_mode in {"entity", "mix"} and query_analysis.enable_graph,
+            graph_hits=graph_hits,
+        ),
         "rerank_requested_mode": rerank_info["requested_mode"],
         "rerank_effective_mode": rerank_info["effective_mode"],
         "rerank_applied": rerank_info["applied"],

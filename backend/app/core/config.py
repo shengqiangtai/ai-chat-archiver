@@ -169,6 +169,11 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 CACHE_DIR = DATA_DIR / "cache"
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "86400"))
 
+# ── SQLite 运行时保护 ─────────────────────────────────────────────────────
+SQLITE_BUSY_TIMEOUT_MS = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "8000"))
+SQLITE_WRITE_RETRY_ATTEMPTS = int(os.getenv("SQLITE_WRITE_RETRY_ATTEMPTS", "3"))
+SQLITE_WRITE_RETRY_BACKOFF_MS = int(os.getenv("SQLITE_WRITE_RETRY_BACKOFF_MS", "150"))
+
 # ── 运行时配置（可动态修改的部分持久化到 config.json） ─────────────────
 RUNTIME_CONFIG_PATH = STORAGE_ROOT / "config.json"
 

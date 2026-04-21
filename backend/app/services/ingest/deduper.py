@@ -11,17 +11,26 @@ from app.utils.hashing import file_hash
 logger = logging.getLogger("archiver.ingest.deduper")
 
 
+def get_skip_reason(doc: Document) -> str | None:
+    """返回文件被增量索引跳过的原因。"""
+    db = get_db()
+    record = db.get_file_record(doc.path)
+    if record is None:
+        return None
+
+    if record["file_hash"] == doc.file_hash:
+        return "unchanged"
+
+    return None
+
+
 def should_skip_file(doc: Document) -> bool:
     """
     文件级去重：基于文件路径 + hash 判断是否需要跳过。
     如果文件内容未变化则跳过。
     """
-    db = get_db()
-    record = db.get_file_record(doc.path)
-    if record is None:
-        return False
-
-    if record["file_hash"] == doc.file_hash:
+    reason = get_skip_reason(doc)
+    if reason == "unchanged":
         logger.debug("文件未变化，跳过: %s", doc.path)
         return True
 

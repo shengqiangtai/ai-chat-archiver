@@ -64,6 +64,14 @@ def _effective_rerank_mode(*, use_rerank: bool, requested_mode: str) -> str:
     return "on"
 
 
+def _effective_graph_mode(*, requested_mode: str, query_analysis: QueryAnalysis) -> str:
+    if requested_mode == "off":
+        return "off"
+    if requested_mode == "on":
+        return "on"
+    return "on" if query_analysis.enable_graph else "off"
+
+
 def _query_analysis_debug(query_analysis: QueryAnalysis) -> dict[str, object]:
     return {
         "query_analysis": asdict(query_analysis),
@@ -95,6 +103,7 @@ def retrieve(
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
     rerank_mode: str = DEFAULT_RERANK_MODE,
+    graph_mode: str = "auto",
     rerank_timeout_ms: int = RERANK_TIMEOUT_MS,
     rerank_candidate_limit: int = RERANK_CANDIDATE_LIMIT,
 ) -> list[RetrievalHit]:
@@ -114,6 +123,7 @@ def retrieve(
         neighbor_turn_window=neighbor_turn_window,
         use_cache=use_cache,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
         rerank_timeout_ms=rerank_timeout_ms,
         rerank_candidate_limit=rerank_candidate_limit,
         include_debug=False,
@@ -137,6 +147,7 @@ def retrieve_debug(
     neighbor_turn_window: int = 1,
     use_cache: bool = True,
     rerank_mode: str = DEFAULT_RERANK_MODE,
+    graph_mode: str = "auto",
     rerank_timeout_ms: int = RERANK_TIMEOUT_MS,
     rerank_candidate_limit: int = RERANK_CANDIDATE_LIMIT,
 ) -> dict:
@@ -156,6 +167,7 @@ def retrieve_debug(
         neighbor_turn_window=neighbor_turn_window,
         use_cache=use_cache,
         rerank_mode=rerank_mode,
+        graph_mode=graph_mode,
         rerank_timeout_ms=rerank_timeout_ms,
         rerank_candidate_limit=rerank_candidate_limit,
         include_debug=True,
@@ -183,6 +195,7 @@ def _retrieve_impl(
     neighbor_turn_window: int,
     use_cache: bool,
     rerank_mode: str,
+    graph_mode: str,
     rerank_timeout_ms: int,
     rerank_candidate_limit: int,
     include_debug: bool,
@@ -197,8 +210,15 @@ def _retrieve_impl(
     requested_rerank_mode = (rerank_mode or DEFAULT_RERANK_MODE).strip().lower()
     if requested_rerank_mode not in {"auto", "off", "on"}:
         requested_rerank_mode = DEFAULT_RERANK_MODE
+    requested_graph_mode = (graph_mode or "auto").strip().lower()
+    if requested_graph_mode not in {"auto", "off", "on"}:
+        requested_graph_mode = "auto"
     query_analysis = analyze_query(user_query)
     effective_use_rerank = use_rerank and query_analysis.enable_rerank
+    effective_graph_mode = _effective_graph_mode(
+        requested_mode=requested_graph_mode,
+        query_analysis=query_analysis,
+    )
     effective_expand_neighbors = expand_neighbors
     effective_rerank_mode = _effective_rerank_mode(
         use_rerank=effective_use_rerank,
@@ -219,11 +239,14 @@ def _retrieve_impl(
         "expand_neighbors": expand_neighbors,
         "neighbor_turn_window": neighbor_turn_window,
         "rerank_mode": requested_rerank_mode,
+        "graph_mode": effective_graph_mode,
         "rerank_timeout_ms": rerank_timeout_ms,
         "rerank_candidate_limit": rerank_candidate_limit,
     }
 
-    if use_cache:
+    allow_cache_read = use_cache and not (include_debug and effective_graph_mode == "on")
+
+    if allow_cache_read:
         cached = get_cache().get_retrieval(user_query, cache_options)
         if cached is not None:
             hits = [RetrievalHit(**item) for item in cached]
@@ -237,6 +260,8 @@ def _retrieve_impl(
                 "final_count": len(hits),
                 "query_entities": [],
                 "expanded_entities": [],
+                "graph_requested_mode": requested_graph_mode,
+                "graph_effective_mode": effective_graph_mode,
                 "rerank_requested_mode": requested_rerank_mode,
                 "rerank_effective_mode": effective_rerank_mode,
                 "rerank_applied": False,
@@ -313,7 +338,7 @@ def _retrieve_impl(
         )
         keyword_hits = [_row_to_hit(row) for row in keyword_rows]
 
-    if retrieval_mode in {"entity", "mix"} and query_analysis.enable_graph:
+    if retrieval_mode in {"entity", "mix"} and effective_graph_mode == "on":
         query_entities = extract_query_entities(user_query)
         seed_entities = get_db().search_entities(query_entities, limit=max(4, top_k))
         expanded_entities = [normalize_entity_name(str(item.get("norm_name") or "")) for item in seed_entities]
@@ -479,8 +504,10 @@ def _retrieve_impl(
         "final_count": len(filtered),
         "query_entities": query_entities,
         "expanded_entities": expanded_entities,
+        "graph_requested_mode": requested_graph_mode,
+        "graph_effective_mode": effective_graph_mode,
         **_graph_debug(
-            graph_routed=retrieval_mode in {"entity", "mix"} and query_analysis.enable_graph,
+            graph_routed=retrieval_mode in {"entity", "mix"} and effective_graph_mode == "on",
             graph_hits=graph_hits,
         ),
         "rerank_requested_mode": rerank_info["requested_mode"],

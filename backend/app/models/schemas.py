@@ -147,6 +147,7 @@ class KbSearchRequest(BaseModel):
     date_to: Optional[str] = None
     retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
+    graph_mode: str = "auto"
     score_threshold: float = 0.30
     rewrite_query: bool = True
     include_debug: bool = False
@@ -181,6 +182,7 @@ class QARequest(BaseModel):
     date_to: Optional[str] = None
     retrieval_mode: str = "mix"
     rerank_mode: str = "auto"
+    graph_mode: str = "auto"
     rewrite_query: bool = True
 
 

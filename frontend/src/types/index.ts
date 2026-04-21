@@ -1,4 +1,5 @@
 export type RerankMode = 'auto' | 'off' | 'on'
+export type GraphMode = 'auto' | 'off' | 'on'
 
 export interface RetrievalHit {
   chunk_id: string
@@ -70,6 +71,8 @@ export interface RetrievalDebug {
   rewrite_strategy?: string
   rerank_requested_mode?: RerankMode
   rerank_effective_mode?: RerankMode | 'off'
+  graph_requested_mode?: GraphMode
+  graph_effective_mode?: 'off' | 'on'
   rerank_applied?: boolean
   rerank_status?: 'skipped' | 'applied' | 'fallback'
   rerank_reason?: string

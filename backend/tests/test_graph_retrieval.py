@@ -290,6 +290,131 @@ def test_graph_routing_is_skipped_when_query_analysis_disables_it(monkeypatch) -
     assert result["debug"]["graph_hits"] == []
 
 
+def test_graph_mode_override_off_skips_graph_for_relation_query(monkeypatch) -> None:
+    class DummyEmbedder:
+        def encode_query(self, query: str) -> list[float]:
+            return [0.0]
+
+    class DummyStore:
+        def query(self, *args, **kwargs) -> list[dict]:
+            return []
+
+    class DummyDB:
+        def search_kb_chunks(self, *args, **kwargs) -> list[dict]:
+            return []
+
+        def search_entities(self, *args, **kwargs) -> list[dict]:
+            raise AssertionError("graph override off should skip entity lookup")
+
+        def get_related_entities(self, *args, **kwargs) -> list[dict]:
+            raise AssertionError("graph override off should skip entity lookup")
+
+        def search_entity_chunks(self, *args, **kwargs) -> list[dict]:
+            raise AssertionError("graph override off should skip entity lookup")
+
+    class DummyCache:
+        def get_retrieval(self, *args, **kwargs):
+            return None
+
+        def set_retrieval(self, *args, **kwargs) -> None:
+            return None
+
+    monkeypatch.setattr(retrieval_module, "get_embedder", lambda: DummyEmbedder())
+    monkeypatch.setattr(retrieval_module, "get_store", lambda: DummyStore())
+    monkeypatch.setattr(retrieval_module, "get_db", lambda: DummyDB())
+    monkeypatch.setattr(retrieval_module, "get_cache", lambda: DummyCache())
+
+    def _unexpected_graph_call(*args, **kwargs):
+        raise AssertionError("graph retrieval should be skipped when graph_mode=off")
+
+    monkeypatch.setattr(retrieval_module, "retrieve_graph_candidates", _unexpected_graph_call)
+
+    result = retrieval_module.retrieve_debug(
+        query="Which module depends on the reranker?",
+        graph_mode="off",
+        use_cache=False,
+        retrieval_mode="mix",
+        use_rerank=False,
+        expand_neighbors=False,
+        top_k=3,
+        top_n=3,
+    )
+
+    assert result["debug"]["query_analysis"]["enable_graph"] is True
+    assert result["debug"]["graph_routed"] is False
+    assert result["debug"]["graph_hit_count"] == 0
+
+
+def test_graph_mode_override_on_forces_graph_for_symbolic_query(monkeypatch) -> None:
+    class DummyEmbedder:
+        def encode_query(self, query: str) -> list[float]:
+            return [0.0]
+
+    class DummyStore:
+        def query(self, *args, **kwargs) -> list[dict]:
+            return []
+
+    class DummyDB:
+        def search_kb_chunks(self, *args, **kwargs) -> list[dict]:
+            return []
+
+        def search_entities(self, *args, **kwargs) -> list[dict]:
+            return [{"entity_id": "entity-1", "norm_name": "pipeline.py"}]
+
+        def get_related_entities(self, *args, **kwargs) -> list[dict]:
+            return []
+
+        def search_entity_chunks(self, *args, **kwargs) -> list[dict]:
+            return []
+
+    class DummyCache:
+        def get_retrieval(self, *args, **kwargs):
+            return None
+
+        def set_retrieval(self, *args, **kwargs) -> None:
+            return None
+
+    monkeypatch.setattr(retrieval_module, "get_embedder", lambda: DummyEmbedder())
+    monkeypatch.setattr(retrieval_module, "get_store", lambda: DummyStore())
+    monkeypatch.setattr(retrieval_module, "get_db", lambda: DummyDB())
+    monkeypatch.setattr(retrieval_module, "get_cache", lambda: DummyCache())
+    monkeypatch.setattr(
+        retrieval_module,
+        "retrieve_graph_candidates",
+        lambda *args, **kwargs: [
+            retrieval_module.RetrievalHit(
+                chunk_id="graph-symbolic",
+                doc_id="doc-graph",
+                score=0.0,
+                rerank_score=None,
+                platform="ChatGPT",
+                title="Graph Symbolic",
+                excerpt="symbolic graph hit",
+                path="graph.md",
+                created_at="2026-04-21",
+                entity_score=2.0,
+                entity_names=["pipeline.py"],
+            )
+        ],
+    )
+
+    result = retrieval_module.retrieve_debug(
+        query="backend/app/services/qa/pipeline.py",
+        graph_mode="on",
+        use_cache=False,
+        retrieval_mode="mix",
+        use_rerank=False,
+        expand_neighbors=False,
+        top_k=3,
+        top_n=3,
+    )
+
+    assert result["debug"]["query_analysis"]["enable_graph"] is False
+    assert result["debug"]["graph_routed"] is True
+    assert result["debug"]["graph_hit_count"] == 1
+    assert result["hits"][0]["chunk_id"] == "graph-symbolic"
+
+
 def test_debug_exposes_graph_routing_state_and_hits(monkeypatch) -> None:
     class DummyEmbedder:
         def encode_query(self, query: str) -> list[float]:
@@ -368,3 +493,101 @@ def test_debug_exposes_graph_routing_state_and_hits(monkeypatch) -> None:
     assert result["debug"]["graph_hit_count"] == 2
     assert [hit["chunk_id"] for hit in result["debug"]["graph_hits"]] == ["graph-1", "graph-2"]
     assert result["debug"]["final_hits"][0]["chunk_id"] == "graph-1"
+
+
+def test_debug_bypasses_cache_to_keep_graph_metadata_reliable(monkeypatch) -> None:
+    class DummyEmbedder:
+        def encode_query(self, query: str) -> list[float]:
+            return [0.0]
+
+    class DummyStore:
+        def query(self, *args, **kwargs) -> list[dict]:
+            return []
+
+    class DummyDB:
+        def search_kb_chunks(self, *args, **kwargs) -> list[dict]:
+            return []
+
+        def search_entities(self, *args, **kwargs) -> list[dict]:
+            return [{"entity_id": "entity-1", "norm_name": "beta"}]
+
+        def get_related_entities(self, *args, **kwargs) -> list[dict]:
+            return []
+
+        def search_entity_chunks(self, *args, **kwargs) -> list[dict]:
+            return []
+
+    class DummyCache:
+        def __init__(self) -> None:
+            self.get_calls = 0
+
+        def get_retrieval(self, *args, **kwargs):
+            self.get_calls += 1
+            return [
+                {
+                    "chunk_id": "cached-hit",
+                    "doc_id": "doc-cached",
+                    "score": 0.9,
+                    "rerank_score": None,
+                    "platform": "ChatGPT",
+                    "title": "Cached Hit",
+                    "excerpt": "cached content",
+                    "path": "cached.md",
+                    "created_at": "2026-04-21",
+                    "url": None,
+                    "keyword_score": None,
+                    "fused_score": None,
+                    "entity_score": None,
+                    "role_summary": "",
+                    "message_range": "",
+                    "model_name": None,
+                    "tags": [],
+                    "entity_names": [],
+                    "turn_index": 0,
+                    "chunk_index": 0,
+                }
+            ]
+
+        def set_retrieval(self, *args, **kwargs) -> None:
+            return None
+
+    cache = DummyCache()
+    monkeypatch.setattr(retrieval_module, "get_embedder", lambda: DummyEmbedder())
+    monkeypatch.setattr(retrieval_module, "get_store", lambda: DummyStore())
+    monkeypatch.setattr(retrieval_module, "get_db", lambda: DummyDB())
+    monkeypatch.setattr(retrieval_module, "get_cache", lambda: cache)
+    monkeypatch.setattr(
+        retrieval_module,
+        "retrieve_graph_candidates",
+        lambda *args, **kwargs: [
+            retrieval_module.RetrievalHit(
+                chunk_id="graph-fresh",
+                doc_id="doc-graph",
+                score=0.0,
+                rerank_score=None,
+                platform="ChatGPT",
+                title="Fresh Graph Hit",
+                excerpt="fresh graph content",
+                path="graph.md",
+                created_at="2026-04-21",
+                entity_score=2.0,
+                entity_names=["beta"],
+            )
+        ],
+    )
+
+    result = retrieval_module.retrieve_debug(
+        query="Which module depends on beta?",
+        use_cache=True,
+        retrieval_mode="mix",
+        use_rerank=False,
+        expand_neighbors=False,
+        top_k=3,
+        top_n=3,
+    )
+
+    assert cache.get_calls == 0
+    assert result["debug"]["cache_hit"] is False
+    assert result["debug"]["graph_routed"] is True
+    assert result["debug"]["graph_hit_count"] == 1
+    assert result["debug"]["graph_hits"][0]["chunk_id"] == "graph-fresh"

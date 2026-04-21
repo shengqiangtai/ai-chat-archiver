@@ -43,15 +43,16 @@ class ModeConfig:
     name: str
     retrieval_mode: str
     rerank_mode: str
+    graph_mode: str
 
 
 MODES = [
-    ModeConfig(name="vector", retrieval_mode="vector", rerank_mode="off"),
-    ModeConfig(name="hybrid", retrieval_mode="hybrid", rerank_mode="off"),
-    ModeConfig(name="entity", retrieval_mode="entity", rerank_mode="off"),
-    ModeConfig(name="mix", retrieval_mode="mix", rerank_mode="off"),
-    ModeConfig(name="mix_graph", retrieval_mode="mix", rerank_mode="off"),
-    ModeConfig(name="mix_rerank", retrieval_mode="mix", rerank_mode="on"),
+    ModeConfig(name="vector", retrieval_mode="vector", rerank_mode="off", graph_mode="off"),
+    ModeConfig(name="hybrid", retrieval_mode="hybrid", rerank_mode="off", graph_mode="off"),
+    ModeConfig(name="entity", retrieval_mode="entity", rerank_mode="off", graph_mode="auto"),
+    ModeConfig(name="mix", retrieval_mode="mix", rerank_mode="off", graph_mode="off"),
+    ModeConfig(name="mix_graph", retrieval_mode="mix", rerank_mode="off", graph_mode="on"),
+    ModeConfig(name="mix_rerank", retrieval_mode="mix", rerank_mode="on", graph_mode="on"),
 ]
 
 
@@ -116,6 +117,7 @@ def run_local_search(payload: dict[str, Any]) -> dict[str, Any]:
         neighbor_turn_window=1,
         use_cache=True,
         rerank_mode=str(payload.get("rerank_mode") or "auto"),
+        graph_mode=str(payload.get("graph_mode") or "auto"),
     )
     return {
         "hits": result["hits"],
@@ -149,6 +151,7 @@ def run_mode(
             "top_k": top_k,
             "retrieval_mode": mode.retrieval_mode,
             "rerank_mode": mode.rerank_mode,
+            "graph_mode": mode.graph_mode,
             "include_debug": True,
             "rewrite_query": True,
         }
@@ -182,6 +185,7 @@ def run_mode(
         {
             "retrieval_mode": mode.retrieval_mode,
             "rerank_mode": mode.rerank_mode,
+            "graph_mode": mode.graph_mode,
             "graph_routed_cases": graph_routed_cases,
             "avg_graph_hits": round(graph_hit_total / len(cases), 3) if cases else 0.0,
             "errors": errors,

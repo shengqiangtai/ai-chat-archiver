@@ -43,6 +43,7 @@ async def api_kb_search(data: KbSearchRequest) -> dict[str, Any]:
                 neighbor_turn_window=1,
                 use_cache=True,
                 rerank_mode=data.rerank_mode,
+                graph_mode=data.graph_mode,
             )
             return {
                 "query": data.query,
@@ -77,6 +78,7 @@ async def api_kb_search(data: KbSearchRequest) -> dict[str, Any]:
             neighbor_turn_window=1,
             use_cache=True,
             rerank_mode=data.rerank_mode,
+            graph_mode=data.graph_mode,
         )
         return {
             "query": data.query,

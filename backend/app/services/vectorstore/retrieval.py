@@ -191,7 +191,7 @@ def _retrieve_impl(
         requested_rerank_mode = DEFAULT_RERANK_MODE
     query_analysis = analyze_query(user_query)
     effective_use_rerank = use_rerank and query_analysis.enable_rerank
-    effective_expand_neighbors = expand_neighbors and query_analysis.enable_graph
+    effective_expand_neighbors = expand_neighbors
     effective_rerank_mode = _effective_rerank_mode(
         use_rerank=effective_use_rerank,
         requested_mode=requested_rerank_mode,
@@ -208,7 +208,7 @@ def _retrieve_impl(
         "score_threshold": score_threshold,
         "use_rerank": effective_use_rerank,
         "retrieval_mode": retrieval_mode,
-        "expand_neighbors": effective_expand_neighbors,
+        "expand_neighbors": expand_neighbors,
         "neighbor_turn_window": neighbor_turn_window,
         "rerank_mode": requested_rerank_mode,
         "rerank_timeout_ms": rerank_timeout_ms,
@@ -303,7 +303,7 @@ def _retrieve_impl(
         )
         keyword_hits = [_row_to_hit(row) for row in keyword_rows]
 
-    if retrieval_mode in {"entity", "mix"} and effective_expand_neighbors:
+    if retrieval_mode in {"entity", "mix"} and query_analysis.enable_graph:
         query_entities = extract_query_entities(user_query)
         seed_entities = get_db().search_entities(query_entities, limit=max(4, top_k))
         expanded_entities = [normalize_entity_name(str(item.get("norm_name") or "")) for item in seed_entities]
@@ -617,7 +617,7 @@ def _normalize_scores(hits: list[RetrievalHit], attr: str) -> list[RetrievalHit]
     min_score = min(raw_scores)
 
     normalized: list[RetrievalHit] = []
-    for hit, raw in zip(hits, raw_scores, strict=False):
+    for hit, raw in zip(hits, raw_scores):
         if max_score > min_score:
             hit.score = (raw - min_score) / (max_score - min_score)
         else:

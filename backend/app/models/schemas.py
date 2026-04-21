@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,10 +150,17 @@ class KbSearchRequest(BaseModel):
     include_debug: bool = False
 
 
+class RetrievalDebug(BaseModel):
+    query_analysis: Optional[QueryAnalysis] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class KbSearchResponse(BaseModel):
     query: str
     hits: List[Dict[str, Any]] = Field(default_factory=list)
     total: int = 0
+    debug: Optional[RetrievalDebug] = None
 
 
 class QARequest(BaseModel):
@@ -176,7 +183,7 @@ class QAResponse(BaseModel):
     citations: List[Dict[str, Any]] = Field(default_factory=list)
     uncertainty: Optional[str] = None
     sources: List[Dict[str, Any]] = Field(default_factory=list)
-    debug: Optional[Dict[str, Any]] = None
+    debug: Optional[RetrievalDebug] = None
 
 
 class OllamaModelUpdateRequest(BaseModel):

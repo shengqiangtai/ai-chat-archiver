@@ -135,3 +135,31 @@ def test_v1_chat_completions_streaming(monkeypatch) -> None:
     assert decoded[1]["choices"][0]["delta"] == {"content": "Hel"}
     assert decoded[2]["choices"][0]["delta"] == {"content": "lo"}
     assert decoded[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None:
+    from app.api import routes_openai_compatible as route_module
+    from app.main import app
+
+    async def fake_stream(**kwargs):
+        assert kwargs["query"] == "Hide metadata"
+        yield "Answer"
+        yield "\n\n[SOURCES_JSON][]"
+
+    monkeypatch.setattr(route_module, "qa_answer_stream", fake_stream)
+
+    client = TestClient(app)
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "ai-chat-archiver-rag",
+            "messages": [{"role": "user", "content": "Hide metadata"}],
+            "stream": True,
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode("utf-8")
+
+    assert "Answer" in body
+    assert "[SOURCES_JSON]" not in body

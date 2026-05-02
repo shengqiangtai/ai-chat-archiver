@@ -14,6 +14,7 @@ from app.models.schemas import OpenAIChatCompletionRequest, OpenAIChatMessage
 from app.services.qa.pipeline import qa_answer, qa_answer_stream
 
 DEFAULT_MODEL_ID = "ai-chat-archiver-rag"
+SOURCES_MARKER = "[SOURCES_JSON]"
 
 router = APIRouter(tags=["openai-compatible"])
 
@@ -156,6 +157,10 @@ async def _stream_chat_completion(
     try:
         yield _sse_data(_chunk(completion_id, created, model, {"role": "assistant"}))
         async for piece in qa_answer_stream(query=query):
+            if SOURCES_MARKER in piece:
+                piece, _ = piece.split(SOURCES_MARKER, 1)
+                if not piece.strip():
+                    continue
             yield _sse_data(_chunk(completion_id, created, model, {"content": piece}))
         yield _sse_data(_chunk(completion_id, created, model, {}, finish_reason="stop"))
         yield _sse_data("[DONE]")

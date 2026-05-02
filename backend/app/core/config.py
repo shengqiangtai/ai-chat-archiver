@@ -217,8 +217,11 @@ def load_runtime_config() -> dict[str, Any]:
         data = _default_runtime()
         save_runtime_config(data)
         return data
+    sanitized = _sanitize_runtime_config(data)
     merged = _default_runtime()
-    merged.update(_sanitize_runtime_config(data))
+    merged.update(sanitized)
+    if sanitized != data:
+        save_runtime_config(merged)
     return merged
 
 

@@ -29,6 +29,11 @@ from app.core.config import (
     GENERATOR_MODEL,
     LMSTUDIO_BASE_URL,
     OLLAMA_BASE_URL,
+    OPENAI_COMPAT_API_KEY,
+    OPENAI_COMPAT_BASE_URL,
+    OPENAI_COMPAT_MODEL,
+    get_current_openai_compatible_base_url,
+    get_current_openai_compatible_model,
     get_current_lmstudio_model,
     get_current_ollama_model,
     get_generator_backend,
@@ -140,6 +145,113 @@ class LMStudioGenerator:
                 return [str(m.get("id", "")) for m in models if m.get("id")]
         except Exception:
             return []
+
+
+class OpenAICompatibleGenerator:
+    """Provider-neutral OpenAI-compatible chat completions client."""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        client_factory=None,
+    ) -> None:
+        self.base_url = (base_url or get_current_openai_compatible_base_url()).rstrip("/")
+        self.api_key = OPENAI_COMPAT_API_KEY if api_key is None else api_key
+        self.model = model or get_current_openai_compatible_model() or OPENAI_COMPAT_MODEL
+        self._client_factory = client_factory or httpx.AsyncClient
+
+    def _headers(self) -> dict[str, str]:
+        if not self.api_key:
+            return {}
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+    def _messages(self, prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int = CONCISE_MAX_TOKENS,
+        system_prompt: str | None = None,
+    ) -> str:
+        payload = {
+            "model": self.model,
+            "messages": self._messages(prompt, system_prompt),
+            "max_tokens": max_tokens,
+            "temperature": GENERATION_TEMPERATURE,
+            "stream": False,
+        }
+        async with self._client_factory(timeout=120.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        return str(choices[0].get("message", {}).get("content") or "").strip()
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        max_tokens: int = CONCISE_MAX_TOKENS,
+        system_prompt: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        payload = {
+            "model": self.model,
+            "messages": self._messages(prompt, system_prompt),
+            "max_tokens": max_tokens,
+            "temperature": GENERATION_TEMPERATURE,
+            "stream": True,
+        }
+        async with self._client_factory(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=self._headers(),
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    text = (line or "").strip()
+                    if not text or not text.startswith("data:"):
+                        continue
+                    chunk_str = text[5:].strip()
+                    if chunk_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(chunk_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield str(content)
+
+    async def is_available(self) -> bool:
+        try:
+            async with self._client_factory(timeout=10.0) as client:
+                resp = await client.get(f"{self.base_url}/models", headers=self._headers())
+                return resp.status_code < 500
+        except Exception:
+            return False
+
+    async def list_models(self) -> list[str]:
+        async with self._client_factory(timeout=20.0) as client:
+            resp = await client.get(f"{self.base_url}/models", headers=self._headers())
+            resp.raise_for_status()
+            data = resp.json()
+        models = data.get("data") or []
+        return [str(m.get("id", "")) for m in models if isinstance(m, dict) and m.get("id")]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -342,6 +454,7 @@ class GeneratorProvider:
 
     def __init__(self) -> None:
         self._lmstudio: LMStudioGenerator | None = None
+        self._openai_compatible: OpenAICompatibleGenerator | None = None
         self._ollama: OllamaGenerator | None = None
         self._transformers: TransformersGenerator | None = None
 
@@ -349,6 +462,11 @@ class GeneratorProvider:
         if self._lmstudio is None:
             self._lmstudio = LMStudioGenerator()
         return self._lmstudio
+
+    def get_openai_compatible(self) -> OpenAICompatibleGenerator:
+        if self._openai_compatible is None:
+            self._openai_compatible = OpenAICompatibleGenerator()
+        return self._openai_compatible
 
     def get_ollama(self) -> OllamaGenerator:
         if self._ollama is None:
@@ -386,6 +504,13 @@ class GeneratorProvider:
                     logger.warning("LM Studio 生成失败: %s", e)
             else:
                 logger.warning("LM Studio 不可用，尝试其他后端")
+
+        if backend == "openai_compatible":
+            compat = self.get_openai_compatible()
+            try:
+                return await compat.generate(prompt, max_tokens, system_prompt=system_prompt)
+            except Exception as e:
+                logger.warning("OpenAI 兼容 API 生成失败: %s", e)
 
         # 2. Ollama
         if backend in ("ollama", "lmstudio"):
@@ -427,6 +552,15 @@ class GeneratorProvider:
                     return
                 except Exception as e:
                     logger.warning("LM Studio 流式生成失败: %s", e)
+
+        if backend == "openai_compatible":
+            compat = self.get_openai_compatible()
+            try:
+                async for token in compat.generate_stream(prompt, max_tokens, system_prompt=system_prompt):
+                    yield token
+                return
+            except Exception as e:
+                logger.warning("OpenAI 兼容 API 流式生成失败: %s", e)
 
         # 2. Ollama 真流式
         if backend in ("ollama", "lmstudio"):

@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -129,3 +130,100 @@ def test_load_runtime_config_rewrites_stale_api_keys(monkeypatch, tmp_path) -> N
     assert "openai_compatible_api_key" not in data
     assert "stale-legacy-secret" not in saved_text
     assert "stale-openai-secret" not in saved_text
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_generator_sends_bearer_auth(monkeypatch) -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    seen: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization")
+        seen["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": "answer from provider"}}
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    generator = OpenAICompatibleGenerator(
+        base_url="https://api.example.com/v1/",
+        api_key="secret-key",
+        model="example-chat",
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    )
+
+    answer = await generator.generate("Question", max_tokens=123, system_prompt="System")
+
+    assert answer == "answer from provider"
+    assert seen["url"] == "https://api.example.com/v1/chat/completions"
+    assert seen["auth"] == "Bearer secret-key"
+    assert seen["payload"] == {
+        "model": "example-chat",
+        "messages": [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Question"},
+        ],
+        "max_tokens": 123,
+        "temperature": 0.3,
+        "stream": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_generator_streams_delta_content() -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        body = (
+            'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    transport = httpx.MockTransport(handler)
+    generator = OpenAICompatibleGenerator(
+        base_url="https://api.example.com/v1",
+        api_key="",
+        model="example-chat",
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in generator.generate_stream(
+            "Question",
+            max_tokens=50,
+            system_prompt=None,
+        )
+    ]
+
+    assert chunks == ["hel", "lo"]
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_generator_availability_uses_models_endpoint() -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.example.com/v1/models"
+        return httpx.Response(200, json={"data": [{"id": "example-chat"}]})
+
+    transport = httpx.MockTransport(handler)
+    generator = OpenAICompatibleGenerator(
+        base_url="https://api.example.com/v1",
+        api_key="secret-key",
+        model="example-chat",
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    )
+
+    assert await generator.is_available() is True
+    assert await generator.list_models() == ["example-chat"]

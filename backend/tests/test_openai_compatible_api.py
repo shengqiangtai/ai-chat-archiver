@@ -163,3 +163,29 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
 
     assert "Answer" in body
     assert "[SOURCES_JSON]" not in body
+
+
+def test_llm_status_includes_openai_compatible(monkeypatch) -> None:
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.get("/api/kb/llm/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "openai_compatible" in data
+    assert data["openai_compatible"]["current_model"]
+    assert data["openai_compatible"]["base_url"]
+
+
+def test_switch_backend_accepts_openai_compatible() -> None:
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.put(
+        "/api/kb/llm/backend",
+        json={"backend": "openai_compatible", "model": "external-chat"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["current_backend"] == "openai_compatible"

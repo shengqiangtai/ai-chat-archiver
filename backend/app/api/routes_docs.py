@@ -11,9 +11,13 @@ from app.core.config import (
     LMSTUDIO_BASE_URL,
     OLLAMA_BASE_URL,
     get_current_lmstudio_model,
+    get_current_openai_compatible_base_url,
+    get_current_openai_compatible_model,
+    get_current_openai_compatible_provider_name,
     get_current_ollama_model,
     get_generator_backend,
     set_current_lmstudio_model,
+    set_current_openai_compatible_config,
     set_current_ollama_model,
     set_generator_backend,
 )
@@ -116,7 +120,7 @@ def api_kb_document_detail(doc_id: str):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class BackendSwitchRequest(BaseModel):
-    backend: str  # "lmstudio" | "ollama" | "transformers"
+    backend: str  # "lmstudio" | "ollama" | "transformers" | "openai_compatible"
     model: str | None = None
 
 
@@ -163,6 +167,13 @@ async def api_llm_status():
             "available": True,
             "current_model": "Qwen3.5-0.8B (本地)",
         },
+        "openai_compatible": {
+            "available": bool(get_current_openai_compatible_base_url()),
+            "models": [get_current_openai_compatible_model()],
+            "current_model": get_current_openai_compatible_model(),
+            "base_url": get_current_openai_compatible_base_url(),
+            "provider_name": get_current_openai_compatible_provider_name(),
+        },
     }
 
 
@@ -170,8 +181,11 @@ async def api_llm_status():
 def api_switch_backend(data: BackendSwitchRequest):
     """切换 LLM 后端。"""
     backend = (data.backend or "").strip().lower()
-    if backend not in ("lmstudio", "ollama", "transformers"):
-        raise HTTPException(status_code=400, detail="backend 必须为 lmstudio / ollama / transformers")
+    if backend not in ("lmstudio", "ollama", "transformers", "openai_compatible"):
+        raise HTTPException(
+            status_code=400,
+            detail="backend 必须为 lmstudio / ollama / transformers / openai_compatible",
+        )
 
     set_generator_backend(backend)
 
@@ -180,6 +194,8 @@ def api_switch_backend(data: BackendSwitchRequest):
             set_current_lmstudio_model(data.model)
         elif backend == "ollama":
             set_current_ollama_model(data.model)
+        elif backend == "openai_compatible":
+            set_current_openai_compatible_config(model=data.model)
 
     return {"ok": True, "current_backend": backend, "model": data.model}
 

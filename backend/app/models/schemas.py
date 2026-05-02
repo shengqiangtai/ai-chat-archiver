@@ -187,6 +187,20 @@ class QARequest(BaseModel):
     rewrite_query: bool = True
 
 
+class OpenAIChatMessage(BaseModel):
+    role: str
+    content: str | List[Dict[str, Any]]
+    name: Optional[str] = None
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    model: str = "ai-chat-archiver-rag"
+    messages: List[OpenAIChatMessage] = Field(default_factory=list)
+    stream: bool = False
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+
+
 class QAResponse(BaseModel):
     answer: str
     citations: List[Dict[str, Any]] = Field(default_factory=list)

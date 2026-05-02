@@ -23,6 +23,7 @@ from app.api.routes_docs import router as docs_router
 from app.api.routes_ingest import router as ingest_router
 from app.api.routes_search import router as search_router
 from app.api.routes_qa import router as qa_router
+from app.api.routes_openai_compatible import router as openai_compatible_router
 
 logger = setup_logger()
 
@@ -57,6 +58,7 @@ app.include_router(docs_router)
 app.include_router(ingest_router)
 app.include_router(search_router)
 app.include_router(qa_router)
+app.include_router(openai_compatible_router)
 
 # ── 前端静态文件服务 ──────────────────────────────────────────────────
 DASHBOARD_FILE = REPO_ROOT / "dashboard" / "index.html"

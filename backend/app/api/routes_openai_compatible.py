@@ -1,0 +1,164 @@
+"""OpenAI-compatible public API routes."""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from typing import AsyncIterator
+
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from app.models.schemas import OpenAIChatCompletionRequest, OpenAIChatMessage
+from app.services.qa.pipeline import qa_answer, qa_answer_stream
+
+DEFAULT_MODEL_ID = "ai-chat-archiver-rag"
+
+router = APIRouter(tags=["openai-compatible"])
+
+
+def _error(message: str, status_code: int = 400) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "param": None,
+                "code": None,
+            }
+        },
+    )
+
+
+def _content_to_text(content: str | list[dict]) -> str:
+    if isinstance(content, str):
+        return content
+
+    parts: list[str] = []
+    for item in content:
+        if item.get("type") != "text":
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def _extract_query(messages: list[OpenAIChatMessage]) -> str | None:
+    for message in reversed(messages):
+        if message.role != "user":
+            continue
+        text = _content_to_text(message.content).strip()
+        if text:
+            return text
+    return None
+
+
+def _usage() -> dict[str, int]:
+    return {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def _chunk(
+    completion_id: str,
+    created: int,
+    model: str,
+    delta: dict[str, str],
+    finish_reason: str | None = None,
+) -> dict:
+    return {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+
+
+def _sse_data(payload: dict | str) -> str:
+    if isinstance(payload, str):
+        return f"data: {payload}\n\n"
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.get("/v1/models")
+async def list_models():
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": DEFAULT_MODEL_ID,
+                "object": "model",
+                "created": 0,
+                "owned_by": "ai-chat-archiver",
+            }
+        ],
+    }
+
+
+@router.post("/v1/chat/completions")
+async def create_chat_completion(data: OpenAIChatCompletionRequest):
+    query = _extract_query(data.messages)
+    if not query:
+        return _error("A non-empty user message is required.")
+
+    model = data.model or DEFAULT_MODEL_ID
+    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created = int(time.time())
+
+    if data.stream:
+        return StreamingResponse(
+            _stream_chat_completion(query, completion_id, created, model),
+            media_type="text/event-stream",
+        )
+
+    try:
+        result = await qa_answer(query=query)
+    except Exception as err:
+        return _error(str(err), status_code=500)
+
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": result.answer,
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": _usage(),
+    }
+
+
+async def _stream_chat_completion(
+    query: str,
+    completion_id: str,
+    created: int,
+    model: str,
+) -> AsyncIterator[str]:
+    try:
+        yield _sse_data(_chunk(completion_id, created, model, {"role": "assistant"}))
+        async for piece in qa_answer_stream(query=query):
+            yield _sse_data(_chunk(completion_id, created, model, {"content": piece}))
+        yield _sse_data(_chunk(completion_id, created, model, {}, finish_reason="stop"))
+        yield _sse_data("[DONE]")
+    except Exception as err:
+        yield _sse_data(_chunk(completion_id, created, model, {"content": f"Error: {err}"}))
+        yield _sse_data("[DONE]")

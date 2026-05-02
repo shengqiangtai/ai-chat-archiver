@@ -200,6 +200,7 @@ def _sanitize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(data)
     sanitized.pop("openai_compatible_api_key", None)
     sanitized.pop("api_key", None)
+    sanitized.pop("OPENAI_COMPAT_API_KEY", None)
     return sanitized
 
 

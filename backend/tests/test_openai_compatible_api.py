@@ -71,6 +71,10 @@ def test_v1_chat_completions_non_streaming(monkeypatch) -> None:
 
     async def fake_qa_answer(**kwargs):
         assert kwargs["query"] == "What is indexed?"
+        assert kwargs["instruction_context"] == (
+            "system: Be concise.\n\n"
+            "developer: Prefer cited answers."
+        )
         return DummyAnswer(
             answer="Indexed answer",
             citations=[],
@@ -88,6 +92,7 @@ def test_v1_chat_completions_non_streaming(monkeypatch) -> None:
             "model": "ai-chat-archiver-rag",
             "messages": [
                 {"role": "system", "content": "Be concise."},
+                {"role": "developer", "content": "Prefer cited answers."},
                 {"role": "user", "content": "What is indexed?"},
             ],
             "stream": False,
@@ -134,6 +139,7 @@ def test_v1_chat_completions_streaming(monkeypatch) -> None:
 
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Stream this"
+        assert kwargs["instruction_context"] is None
         yield "Hel"
         yield "lo"
 
@@ -171,6 +177,7 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
 
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Hide metadata"
+        assert kwargs["instruction_context"] is None
         yield "Answer"
         yield "\n\n[SOURCES_JSON][]"
 
@@ -191,6 +198,43 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
 
     assert "Answer" in body
     assert "[SOURCES_JSON]" not in body
+
+
+def test_v1_chat_completions_streaming_uses_error_payload(monkeypatch) -> None:
+    from app.api import routes_openai_compatible as route_module
+    from app.main import app
+
+    async def fake_stream(**kwargs):
+        assert kwargs["query"] == "Trigger error"
+        raise RuntimeError("stream failed")
+        yield
+
+    monkeypatch.setattr(route_module, "qa_answer_stream", fake_stream)
+
+    client = TestClient(app)
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "ai-chat-archiver-rag",
+            "messages": [{"role": "user", "content": "Trigger error"}],
+            "stream": True,
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode("utf-8")
+
+    chunks = [
+        line.removeprefix("data: ")
+        for line in body.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    decoded = [json.loads(chunk) for chunk in chunks]
+    assert decoded[0]["choices"][0]["delta"] == {"role": "assistant"}
+    assert decoded[1]["error"]["type"] == "server_error"
+    assert decoded[1]["error"]["message"] == "stream failed"
+    assert "Error: stream failed" not in body
+    assert "data: [DONE]" in body
 
 
 def test_llm_status_includes_openai_compatible(monkeypatch) -> None:

@@ -79,6 +79,7 @@ async def qa_answer(
     graph_mode: str = "auto",
     rewrite_query_enabled: bool = True,
     include_debug: bool = False,
+    instruction_context: str | None = None,
 ) -> AnswerResult:
     """
     完整 RAG 问答流程（非流式）。
@@ -170,6 +171,8 @@ async def qa_answer(
 
     user_prompt = build_user_prompt(query, hits, mode)
     system_prompt = get_system_prompt()
+    if instruction_context:
+        system_prompt = f"{system_prompt}\n\n客户端附加指令：\n{instruction_context}"
     t_prompt = time.time() - t0 - t_retrieve
 
     try:
@@ -249,6 +252,7 @@ async def qa_answer_stream(
     rerank_mode: str = "auto",
     graph_mode: str = "auto",
     rewrite_query_enabled: bool = True,
+    instruction_context: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式 QA 问答。
@@ -296,6 +300,8 @@ async def qa_answer_stream(
 
     user_prompt = build_user_prompt(query, hits, mode)
     system_prompt = get_system_prompt()
+    if instruction_context:
+        system_prompt = f"{system_prompt}\n\n客户端附加指令：\n{instruction_context}"
 
     try:
         generator = get_generator()

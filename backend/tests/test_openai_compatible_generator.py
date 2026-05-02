@@ -90,6 +90,7 @@ def test_save_runtime_config_scrubs_api_keys(monkeypatch, tmp_path) -> None:
         {
             "api_key": "legacy-secret",
             "openai_compatible_api_key": "openai-secret",
+            "OPENAI_COMPAT_API_KEY": "env-style-secret",
             "openai_compatible_base_url": "https://api.saved.com/v1",
         }
     )
@@ -100,8 +101,10 @@ def test_save_runtime_config_scrubs_api_keys(monkeypatch, tmp_path) -> None:
     assert data["openai_compatible_base_url"] == "https://api.saved.com/v1"
     assert "api_key" not in data
     assert "openai_compatible_api_key" not in data
+    assert "OPENAI_COMPAT_API_KEY" not in data
     assert "legacy-secret" not in saved_text
     assert "openai-secret" not in saved_text
+    assert "env-style-secret" not in saved_text
 
 
 def test_load_runtime_config_rewrites_stale_api_keys(monkeypatch, tmp_path) -> None:
@@ -116,6 +119,7 @@ def test_load_runtime_config_rewrites_stale_api_keys(monkeypatch, tmp_path) -> N
             {
                 "api_key": "stale-legacy-secret",
                 "openai_compatible_api_key": "stale-openai-secret",
+                "OPENAI_COMPAT_API_KEY": "stale-env-style-secret",
                 "openai_compatible_model": "stale-model",
             },
             ensure_ascii=False,
@@ -129,8 +133,10 @@ def test_load_runtime_config_rewrites_stale_api_keys(monkeypatch, tmp_path) -> N
     assert data["openai_compatible_model"] == "stale-model"
     assert "api_key" not in data
     assert "openai_compatible_api_key" not in data
+    assert "OPENAI_COMPAT_API_KEY" not in data
     assert "stale-legacy-secret" not in saved_text
     assert "stale-openai-secret" not in saved_text
+    assert "stale-env-style-secret" not in saved_text
 
 
 def test_openai_compatible_generator_sends_bearer_auth() -> None:

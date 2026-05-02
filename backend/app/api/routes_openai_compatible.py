@@ -57,6 +57,19 @@ def _extract_query(messages: list[OpenAIChatMessage]) -> str | None:
     return None
 
 
+def _extract_instruction_context(messages: list[OpenAIChatMessage]) -> str | None:
+    parts: list[str] = []
+    for message in messages:
+        if message.role not in {"system", "developer"}:
+            continue
+        text = _content_to_text(message.content).strip()
+        if text:
+            parts.append(f"{message.role}: {text}")
+    if not parts:
+        return None
+    return "\n\n".join(parts)
+
+
 def _usage() -> dict[str, int]:
     return {
         "prompt_tokens": 0,
@@ -113,6 +126,7 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
     query = _extract_query(data.messages)
     if not query:
         return _error("A non-empty user message is required.")
+    instruction_context = _extract_instruction_context(data.messages)
 
     model = data.model or DEFAULT_MODEL_ID
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -120,12 +134,21 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
 
     if data.stream:
         return StreamingResponse(
-            _stream_chat_completion(query, completion_id, created, model),
+            _stream_chat_completion(
+                query,
+                instruction_context,
+                completion_id,
+                created,
+                model,
+            ),
             media_type="text/event-stream",
         )
 
     try:
-        result = await qa_answer(query=query)
+        result = await qa_answer(
+            query=query,
+            instruction_context=instruction_context,
+        )
     except Exception as err:
         return _error(str(err), status_code=500)
 
@@ -150,13 +173,17 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
 
 async def _stream_chat_completion(
     query: str,
+    instruction_context: str | None,
     completion_id: str,
     created: int,
     model: str,
 ) -> AsyncIterator[str]:
     try:
         yield _sse_data(_chunk(completion_id, created, model, {"role": "assistant"}))
-        async for piece in qa_answer_stream(query=query):
+        async for piece in qa_answer_stream(
+            query=query,
+            instruction_context=instruction_context,
+        ):
             if SOURCES_MARKER in piece:
                 piece, _ = piece.split(SOURCES_MARKER, 1)
                 if not piece.strip():
@@ -165,5 +192,14 @@ async def _stream_chat_completion(
         yield _sse_data(_chunk(completion_id, created, model, {}, finish_reason="stop"))
         yield _sse_data("[DONE]")
     except Exception as err:
-        yield _sse_data(_chunk(completion_id, created, model, {"content": f"Error: {err}"}))
+        yield _sse_data(
+            {
+                "error": {
+                    "message": str(err),
+                    "type": "server_error",
+                    "param": None,
+                    "code": None,
+                }
+            }
+        )
         yield _sse_data("[DONE]")

@@ -30,7 +30,6 @@ from app.core.config import (
     LMSTUDIO_BASE_URL,
     OLLAMA_BASE_URL,
     OPENAI_COMPAT_API_KEY,
-    OPENAI_COMPAT_BASE_URL,
     OPENAI_COMPAT_MODEL,
     get_current_openai_compatible_base_url,
     get_current_openai_compatible_model,
@@ -241,7 +240,7 @@ class OpenAICompatibleGenerator:
         try:
             async with self._client_factory(timeout=10.0) as client:
                 resp = await client.get(f"{self.base_url}/models", headers=self._headers())
-                return resp.status_code < 500
+                return 200 <= resp.status_code < 300
         except Exception:
             return False
 
@@ -555,12 +554,16 @@ class GeneratorProvider:
 
         if backend == "openai_compatible":
             compat = self.get_openai_compatible()
+            yielded_any = False
             try:
                 async for token in compat.generate_stream(prompt, max_tokens, system_prompt=system_prompt):
+                    yielded_any = True
                     yield token
                 return
             except Exception as e:
                 logger.warning("OpenAI 兼容 API 流式生成失败: %s", e)
+                if yielded_any:
+                    raise
 
         # 2. Ollama 真流式
         if backend in ("ollama", "lmstudio"):

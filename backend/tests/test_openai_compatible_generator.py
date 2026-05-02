@@ -237,3 +237,116 @@ async def _openai_compatible_generator_availability_uses_models_endpoint() -> No
 
     assert await generator.is_available() is True
     assert await generator.list_models() == ["example-chat"]
+
+
+def test_openai_compatible_generator_availability_rejects_client_errors() -> None:
+    asyncio.run(_openai_compatible_generator_availability_rejects_client_errors())
+
+
+async def _openai_compatible_generator_availability_rejects_client_errors() -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    for status_code in (401, 404):
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert str(request.url) == "https://api.example.com/v1/models"
+            return httpx.Response(status_code)
+
+        transport = httpx.MockTransport(handler)
+        generator = OpenAICompatibleGenerator(
+            base_url="https://api.example.com/v1",
+            api_key="secret-key",
+            model="example-chat",
+            client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+        )
+
+        assert await generator.is_available() is False
+
+
+def test_generator_provider_dispatches_openai_compatible_generate(monkeypatch) -> None:
+    asyncio.run(_generator_provider_dispatches_openai_compatible_generate(monkeypatch))
+
+
+async def _generator_provider_dispatches_openai_compatible_generate(monkeypatch) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeOpenAICompatible:
+        async def generate(self, prompt, max_tokens, system_prompt=None):
+            assert prompt == "Question"
+            assert max_tokens == generator_module.CONCISE_MAX_TOKENS
+            assert system_prompt == "System"
+            return "provider answer"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "openai_compatible")
+
+    provider = generator_module.GeneratorProvider()
+    provider._openai_compatible = FakeOpenAICompatible()
+
+    assert await provider.generate("Question", system_prompt="System") == "provider answer"
+
+
+def test_generator_provider_dispatches_openai_compatible_stream(monkeypatch) -> None:
+    asyncio.run(_generator_provider_dispatches_openai_compatible_stream(monkeypatch))
+
+
+async def _generator_provider_dispatches_openai_compatible_stream(monkeypatch) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeOpenAICompatible:
+        async def generate_stream(self, prompt, max_tokens, system_prompt=None):
+            assert prompt == "Question"
+            assert max_tokens == generator_module.CONCISE_MAX_TOKENS
+            assert system_prompt == "System"
+            yield "provider "
+            yield "stream"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "openai_compatible")
+
+    provider = generator_module.GeneratorProvider()
+    provider._openai_compatible = FakeOpenAICompatible()
+
+    chunks = [
+        chunk
+        async for chunk in provider.generate_stream("Question", system_prompt="System")
+    ]
+
+    assert chunks == ["provider ", "stream"]
+
+
+def test_generator_provider_does_not_fallback_after_partial_openai_stream(
+    monkeypatch,
+) -> None:
+    asyncio.run(
+        _generator_provider_does_not_fallback_after_partial_openai_stream(monkeypatch)
+    )
+
+
+async def _generator_provider_does_not_fallback_after_partial_openai_stream(
+    monkeypatch,
+) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeOpenAICompatible:
+        async def generate_stream(self, prompt, max_tokens, system_prompt=None):
+            del prompt, max_tokens, system_prompt
+            yield "partial "
+            raise RuntimeError("remote stream failed")
+
+    class FakeTransformers:
+        is_available = True
+
+        def generate(self, prompt, max_tokens):
+            del prompt, max_tokens
+            return "fallback answer"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "openai_compatible")
+
+    provider = generator_module.GeneratorProvider()
+    provider._openai_compatible = FakeOpenAICompatible()
+    provider._transformers = FakeTransformers()
+
+    chunks: list[str] = []
+    with pytest.raises(RuntimeError, match="remote stream failed"):
+        async for chunk in provider.generate_stream("Question"):
+            chunks.append(chunk)
+
+    assert chunks == ["partial "]

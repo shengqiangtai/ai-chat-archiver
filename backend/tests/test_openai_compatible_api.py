@@ -75,6 +75,7 @@ def test_v1_chat_completions_non_streaming(monkeypatch) -> None:
             "system: Be concise.\n\n"
             "developer: Prefer cited answers."
         )
+        assert kwargs["raise_generation_errors"] is True
         return DummyAnswer(
             answer="Indexed answer",
             citations=[],
@@ -113,6 +114,33 @@ def test_v1_chat_completions_non_streaming(monkeypatch) -> None:
         "completion_tokens": 0,
         "total_tokens": 0,
     }
+
+
+def test_v1_chat_completions_non_streaming_uses_server_error(monkeypatch) -> None:
+    from app.api import routes_openai_compatible as route_module
+    from app.main import app
+
+    async def fake_qa_answer(**kwargs):
+        assert kwargs["query"] == "Trigger error"
+        assert kwargs["raise_generation_errors"] is True
+        raise RuntimeError("generate failed")
+
+    monkeypatch.setattr(route_module, "qa_answer", fake_qa_answer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "ai-chat-archiver-rag",
+            "messages": [{"role": "user", "content": "Trigger error"}],
+            "stream": False,
+        },
+    )
+
+    assert response.status_code == 500
+    data = response.json()
+    assert data["error"]["type"] == "server_error"
+    assert data["error"]["message"] == "generate failed"
 
 
 def test_v1_chat_completions_requires_user_message() -> None:

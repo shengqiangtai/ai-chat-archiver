@@ -152,6 +152,7 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
         result = await qa_answer(
             query=query,
             instruction_context=instruction_context,
+            raise_generation_errors=True,
         )
     except Exception as err:
         return _error(str(err), status_code=500, error_type="server_error")

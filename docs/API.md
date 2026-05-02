@@ -90,3 +90,4 @@ curl http://127.0.0.1:8765/v1/chat/completions \
 ```
 
 Unsupported OpenAI fields such as tools, vision, and strict JSON schema output are ignored in the first compatible version.
+Sampling fields such as `temperature` and `max_tokens` are accepted for client compatibility but currently ignored by the RAG wrapper.

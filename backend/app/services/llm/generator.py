@@ -485,6 +485,7 @@ class GeneratorProvider:
         prompt: str,
         mode: str = "concise",
         system_prompt: str | None = None,
+        raise_backend_errors: bool = False,
     ) -> str:
         """根据配置选择后端生成文本。
 
@@ -513,6 +514,8 @@ class GeneratorProvider:
                 return await compat.generate(prompt, max_tokens, system_prompt=system_prompt)
             except Exception as e:
                 logger.warning("OpenAI 兼容 API 生成失败: %s", e)
+                if raise_backend_errors:
+                    raise
 
         # 2. Ollama
         if backend in ("ollama", "lmstudio"):
@@ -539,6 +542,7 @@ class GeneratorProvider:
         prompt: str,
         mode: str = "concise",
         system_prompt: str | None = None,
+        raise_backend_errors: bool = False,
     ) -> AsyncGenerator[str, None]:
         """流式生成。LM Studio 和 Ollama 支持真流式。"""
         max_tokens = CONCISE_MAX_TOKENS if mode == "concise" else DETAILED_MAX_TOKENS
@@ -565,7 +569,7 @@ class GeneratorProvider:
                 return
             except Exception as e:
                 logger.warning("OpenAI 兼容 API 流式生成失败: %s", e)
-                if yielded_any:
+                if yielded_any or raise_backend_errors:
                     raise
 
         # 2. Ollama 真流式

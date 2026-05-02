@@ -76,6 +76,7 @@ def test_qa_answer_downgrades_unsupported_generation(monkeypatch) -> None:
 
     class DummyGenerator:
         async def generate(self, *args, **kwargs):
+            assert kwargs.get("raise_backend_errors") is False
             return "The system uses a graph database in production."
 
     monkeypatch.setattr(pipeline_module, "rewrite_query", _rewrite_query)
@@ -130,6 +131,7 @@ def test_qa_answer_skips_answer_cache_when_instruction_context_is_present(monkey
 
     class DummyGenerator:
         async def generate(self, *args, **kwargs):
+            assert kwargs.get("raise_backend_errors") is False
             return "fresh answer"
 
     cache = DummyCache()
@@ -177,6 +179,7 @@ def test_qa_answer_stream_can_raise_generation_errors(monkeypatch) -> None:
 
     class FailingGenerator:
         async def generate_stream(self, *args, **kwargs):
+            assert kwargs.get("raise_backend_errors") is True
             raise RuntimeError("stream failed")
             yield
 

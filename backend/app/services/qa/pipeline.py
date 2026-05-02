@@ -80,6 +80,7 @@ async def qa_answer(
     rewrite_query_enabled: bool = True,
     include_debug: bool = False,
     instruction_context: str | None = None,
+    raise_generation_errors: bool = False,
 ) -> AnswerResult:
     """
     完整 RAG 问答流程（非流式）。
@@ -179,10 +180,17 @@ async def qa_answer(
 
     try:
         generator = get_generator()
-        raw_answer = await generator.generate(user_prompt, mode=mode, system_prompt=system_prompt)
+        raw_answer = await generator.generate(
+            user_prompt,
+            mode=mode,
+            system_prompt=system_prompt,
+            raise_backend_errors=raise_generation_errors,
+        )
         t_generate = time.time() - t0 - t_retrieve - t_prompt
     except Exception as e:
         logger.warning("生成失败，使用降级回答: %s", e)
+        if raise_generation_errors:
+            raise
         raw_answer = build_fallback_answer(hits)
         t_generate = time.time() - t0 - t_retrieve - t_prompt
     finally:
@@ -309,7 +317,12 @@ async def qa_answer_stream(
 
     try:
         generator = get_generator()
-        async for token in generator.generate_stream(user_prompt, mode=mode, system_prompt=system_prompt):
+        async for token in generator.generate_stream(
+            user_prompt,
+            mode=mode,
+            system_prompt=system_prompt,
+            raise_backend_errors=raise_generation_errors,
+        ):
             yield token
     except Exception as e:
         logger.warning("流式生成失败: %s", e)

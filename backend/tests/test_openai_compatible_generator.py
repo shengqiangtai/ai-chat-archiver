@@ -356,3 +356,69 @@ async def _generator_provider_does_not_fallback_after_partial_openai_stream(
             chunks.append(chunk)
 
     assert chunks == ["partial "]
+
+
+def test_generator_provider_can_raise_openai_generate_errors(monkeypatch) -> None:
+    asyncio.run(_generator_provider_can_raise_openai_generate_errors(monkeypatch))
+
+
+async def _generator_provider_can_raise_openai_generate_errors(monkeypatch) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeOpenAICompatible:
+        async def generate(self, prompt, max_tokens, system_prompt=None):
+            del prompt, max_tokens, system_prompt
+            raise RuntimeError("remote generate failed")
+
+    class FakeTransformers:
+        is_available = True
+
+        def generate(self, prompt, max_tokens):
+            del prompt, max_tokens
+            return "fallback answer"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "openai_compatible")
+
+    provider = generator_module.GeneratorProvider()
+    provider._openai_compatible = FakeOpenAICompatible()
+    provider._transformers = FakeTransformers()
+
+    with pytest.raises(RuntimeError, match="remote generate failed"):
+        await provider.generate("Question", raise_backend_errors=True)
+
+
+def test_generator_provider_can_raise_openai_stream_errors_before_tokens(
+    monkeypatch,
+) -> None:
+    asyncio.run(
+        _generator_provider_can_raise_openai_stream_errors_before_tokens(monkeypatch)
+    )
+
+
+async def _generator_provider_can_raise_openai_stream_errors_before_tokens(
+    monkeypatch,
+) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeOpenAICompatible:
+        async def generate_stream(self, prompt, max_tokens, system_prompt=None):
+            del prompt, max_tokens, system_prompt
+            raise RuntimeError("remote stream failed")
+            yield
+
+    class FakeTransformers:
+        is_available = True
+
+        def generate(self, prompt, max_tokens):
+            del prompt, max_tokens
+            return "fallback answer"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "openai_compatible")
+
+    provider = generator_module.GeneratorProvider()
+    provider._openai_compatible = FakeOpenAICompatible()
+    provider._transformers = FakeTransformers()
+
+    with pytest.raises(RuntimeError, match="remote stream failed"):
+        async for _ in provider.generate_stream("Question", raise_backend_errors=True):
+            pass

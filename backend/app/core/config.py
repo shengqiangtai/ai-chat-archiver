@@ -196,6 +196,13 @@ def _default_runtime() -> dict[str, Any]:
     }
 
 
+def _sanitize_runtime_config(data: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(data)
+    sanitized.pop("openai_compatible_api_key", None)
+    sanitized.pop("api_key", None)
+    return sanitized
+
+
 def load_runtime_config() -> dict[str, Any]:
     STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
     if not RUNTIME_CONFIG_PATH.exists():
@@ -211,14 +218,14 @@ def load_runtime_config() -> dict[str, Any]:
         save_runtime_config(data)
         return data
     merged = _default_runtime()
-    merged.update(data)
+    merged.update(_sanitize_runtime_config(data))
     return merged
 
 
 def save_runtime_config(data: dict[str, Any]) -> None:
     STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
     merged = _default_runtime()
-    merged.update(data or {})
+    merged.update(_sanitize_runtime_config(data or {}))
     RUNTIME_CONFIG_PATH.write_text(
         json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -271,8 +278,6 @@ def set_current_openai_compatible_config(
         data["openai_compatible_model"] = model.strip()
     if provider_name is not None:
         data["openai_compatible_provider_name"] = provider_name.strip()
-    data.pop("openai_compatible_api_key", None)
-    data.pop("api_key", None)
     save_runtime_config(data)
 
 

@@ -50,3 +50,27 @@ def test_openai_compatible_runtime_config_does_not_store_api_key(
     assert data["openai_compatible_provider_name"] == "Changed"
     assert "secret-key" not in config.RUNTIME_CONFIG_PATH.read_text(encoding="utf-8")
     assert "api_key" not in data
+
+
+def test_save_runtime_config_scrubs_api_keys(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ARCHIVER_STORAGE_ROOT", str(tmp_path / "storage"))
+
+    import app.core.config as config
+
+    config = importlib.reload(config)
+    config.save_runtime_config(
+        {
+            "api_key": "legacy-secret",
+            "openai_compatible_api_key": "openai-secret",
+            "openai_compatible_base_url": "https://api.saved.com/v1",
+        }
+    )
+
+    data = config.load_runtime_config()
+    saved_text = config.RUNTIME_CONFIG_PATH.read_text(encoding="utf-8")
+
+    assert data["openai_compatible_base_url"] == "https://api.saved.com/v1"
+    assert "api_key" not in data
+    assert "openai_compatible_api_key" not in data
+    assert "legacy-secret" not in saved_text
+    assert "openai-secret" not in saved_text

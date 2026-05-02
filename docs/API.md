@@ -50,7 +50,7 @@ Returns:
     {
       "id": "ai-chat-archiver-rag",
       "object": "model",
-      "created": 1777651200,
+      "created": 0,
       "owned_by": "ai-chat-archiver"
     }
   ]

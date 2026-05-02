@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import importlib
+import os
 import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -22,6 +25,31 @@ class DummyAnswer:
     uncertainty: str | None
     sources: list
     debug: dict
+
+
+@pytest.fixture(autouse=True)
+def isolated_runtime_config(monkeypatch, tmp_path):
+    env_snapshot = {key: os.environ.get(key) for key in ("ARCHIVER_STORAGE_ROOT",)}
+    monkeypatch.setenv("ARCHIVER_STORAGE_ROOT", str(tmp_path / "storage"))
+
+    import app.core.config as config
+
+    importlib.reload(config)
+    if "app.services.llm.generator" in sys.modules:
+        importlib.reload(sys.modules["app.services.llm.generator"])
+    if "app.api.routes_docs" in sys.modules:
+        importlib.reload(sys.modules["app.api.routes_docs"])
+    yield
+    for key, value in env_snapshot.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    importlib.reload(config)
+    if "app.services.llm.generator" in sys.modules:
+        importlib.reload(sys.modules["app.services.llm.generator"])
+    if "app.api.routes_docs" in sys.modules:
+        importlib.reload(sys.modules["app.api.routes_docs"])
 
 
 def test_v1_models_returns_openai_shape() -> None:
@@ -166,7 +194,24 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
 
 
 def test_llm_status_includes_openai_compatible(monkeypatch) -> None:
+    from app.api import routes_docs as route_module
     from app.main import app
+
+    class FakeOpenAICompatibleGenerator:
+        def __init__(self):
+            self.model = "status-chat"
+
+        async def is_available(self):
+            return True
+
+        async def list_models(self):
+            return ["status-chat", "other-chat"]
+
+    monkeypatch.setattr(
+        route_module,
+        "OpenAICompatibleGenerator",
+        FakeOpenAICompatibleGenerator,
+    )
 
     client = TestClient(app)
     response = client.get("/api/kb/llm/status")
@@ -174,12 +219,20 @@ def test_llm_status_includes_openai_compatible(monkeypatch) -> None:
     assert response.status_code == 200
     data = response.json()
     assert "openai_compatible" in data
-    assert data["openai_compatible"]["current_model"]
+    assert data["openai_compatible"]["available"] is True
+    assert data["openai_compatible"]["models"] == ["status-chat", "other-chat"]
+    assert data["openai_compatible"]["current_model"] == "status-chat"
     assert data["openai_compatible"]["base_url"]
 
 
 def test_switch_backend_accepts_openai_compatible() -> None:
+    from app.core.config import get_current_openai_compatible_model
+    from app.services.llm.generator import get_generator
     from app.main import app
+
+    provider = get_generator()
+    old_generator = provider.get_openai_compatible()
+    assert old_generator.model != "external-chat"
 
     client = TestClient(app)
     response = client.put(
@@ -189,3 +242,6 @@ def test_switch_backend_accepts_openai_compatible() -> None:
 
     assert response.status_code == 200
     assert response.json()["current_backend"] == "openai_compatible"
+    assert get_current_openai_compatible_model() == "external-chat"
+    assert provider.get_openai_compatible() is not old_generator
+    assert provider.get_openai_compatible().model == "external-chat"

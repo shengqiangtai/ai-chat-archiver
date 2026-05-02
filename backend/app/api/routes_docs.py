@@ -12,7 +12,6 @@ from app.core.config import (
     OLLAMA_BASE_URL,
     get_current_lmstudio_model,
     get_current_openai_compatible_base_url,
-    get_current_openai_compatible_model,
     get_current_openai_compatible_provider_name,
     get_current_ollama_model,
     get_generator_backend,
@@ -23,7 +22,12 @@ from app.core.config import (
 )
 from app.db.sqlite import get_db
 from app.models.schemas import OllamaModelUpdateRequest, SaveRequest, SearchRequest
-from app.services.llm.generator import LMStudioGenerator, OllamaGenerator
+from app.services.llm.generator import (
+    LMStudioGenerator,
+    OllamaGenerator,
+    OpenAICompatibleGenerator,
+    reset_openai_compatible_generator_cache,
+)
 
 router = APIRouter(tags=["documents"])
 
@@ -149,6 +153,16 @@ async def api_llm_status():
         except Exception:
             pass
 
+    # OpenAI-compatible provider
+    openai_compatible = OpenAICompatibleGenerator()
+    openai_compatible_available = await openai_compatible.is_available()
+    openai_compatible_models: list[str] = []
+    if openai_compatible_available:
+        try:
+            openai_compatible_models = await openai_compatible.list_models()
+        except Exception:
+            pass
+
     return {
         "current_backend": current_backend,
         "lmstudio": {
@@ -168,9 +182,9 @@ async def api_llm_status():
             "current_model": "Qwen3.5-0.8B (本地)",
         },
         "openai_compatible": {
-            "available": bool(get_current_openai_compatible_base_url()),
-            "models": [get_current_openai_compatible_model()],
-            "current_model": get_current_openai_compatible_model(),
+            "available": openai_compatible_available,
+            "models": openai_compatible_models,
+            "current_model": openai_compatible.model,
             "base_url": get_current_openai_compatible_base_url(),
             "provider_name": get_current_openai_compatible_provider_name(),
         },
@@ -196,6 +210,7 @@ def api_switch_backend(data: BackendSwitchRequest):
             set_current_ollama_model(data.model)
         elif backend == "openai_compatible":
             set_current_openai_compatible_config(model=data.model)
+            reset_openai_compatible_generator_cache()
 
     return {"ok": True, "current_backend": backend, "model": data.model}
 

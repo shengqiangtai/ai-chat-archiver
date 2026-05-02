@@ -467,6 +467,9 @@ class GeneratorProvider:
             self._openai_compatible = OpenAICompatibleGenerator()
         return self._openai_compatible
 
+    def reset_openai_compatible(self) -> None:
+        self._openai_compatible = None
+
     def get_ollama(self) -> OllamaGenerator:
         if self._ollama is None:
             self._ollama = OllamaGenerator()
@@ -599,6 +602,11 @@ def get_generator() -> GeneratorProvider:
     if _provider is None:
         _provider = GeneratorProvider()
     return _provider
+
+
+def reset_openai_compatible_generator_cache() -> None:
+    if _provider is not None:
+        _provider.reset_openai_compatible()
 
 
 def unload_generator() -> None:

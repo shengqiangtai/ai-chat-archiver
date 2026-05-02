@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -132,8 +133,11 @@ def test_load_runtime_config_rewrites_stale_api_keys(monkeypatch, tmp_path) -> N
     assert "stale-openai-secret" not in saved_text
 
 
-@pytest.mark.asyncio
-async def test_openai_compatible_generator_sends_bearer_auth(monkeypatch) -> None:
+def test_openai_compatible_generator_sends_bearer_auth() -> None:
+    asyncio.run(_openai_compatible_generator_sends_bearer_auth())
+
+
+async def _openai_compatible_generator_sends_bearer_auth() -> None:
     from app.services.llm.generator import OpenAICompatibleGenerator
 
     seen: dict[str, object] = {}
@@ -176,8 +180,11 @@ async def test_openai_compatible_generator_sends_bearer_auth(monkeypatch) -> Non
     }
 
 
-@pytest.mark.asyncio
-async def test_openai_compatible_generator_streams_delta_content() -> None:
+def test_openai_compatible_generator_streams_delta_content() -> None:
+    asyncio.run(_openai_compatible_generator_streams_delta_content())
+
+
+async def _openai_compatible_generator_streams_delta_content() -> None:
     from app.services.llm.generator import OpenAICompatibleGenerator
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -209,8 +216,11 @@ async def test_openai_compatible_generator_streams_delta_content() -> None:
     assert chunks == ["hel", "lo"]
 
 
-@pytest.mark.asyncio
-async def test_openai_compatible_generator_availability_uses_models_endpoint() -> None:
+def test_openai_compatible_generator_availability_uses_models_endpoint() -> None:
+    asyncio.run(_openai_compatible_generator_availability_uses_models_endpoint())
+
+
+async def _openai_compatible_generator_availability_uses_models_endpoint() -> None:
     from app.services.llm.generator import OpenAICompatibleGenerator
 
     async def handler(request: httpx.Request) -> httpx.Response:

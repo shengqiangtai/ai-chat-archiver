@@ -140,6 +140,7 @@ def test_v1_chat_completions_streaming(monkeypatch) -> None:
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Stream this"
         assert kwargs["instruction_context"] is None
+        assert kwargs["raise_generation_errors"] is True
         yield "Hel"
         yield "lo"
 
@@ -178,6 +179,7 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Hide metadata"
         assert kwargs["instruction_context"] is None
+        assert kwargs["raise_generation_errors"] is True
         yield "Answer"
         yield "\n\n[SOURCES_JSON][]"
 
@@ -206,6 +208,7 @@ def test_v1_chat_completions_streaming_uses_error_payload(monkeypatch) -> None:
 
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Trigger error"
+        assert kwargs["raise_generation_errors"] is True
         raise RuntimeError("stream failed")
         yield
 

@@ -19,13 +19,17 @@ SOURCES_MARKER = "[SOURCES_JSON]"
 router = APIRouter(tags=["openai-compatible"])
 
 
-def _error(message: str, status_code: int = 400) -> JSONResponse:
+def _error(
+    message: str,
+    status_code: int = 400,
+    error_type: str = "invalid_request_error",
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={
             "error": {
                 "message": message,
-                "type": "invalid_request_error",
+                "type": error_type,
                 "param": None,
                 "code": None,
             }
@@ -150,7 +154,7 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
             instruction_context=instruction_context,
         )
     except Exception as err:
-        return _error(str(err), status_code=500)
+        return _error(str(err), status_code=500, error_type="server_error")
 
     return {
         "id": completion_id,
@@ -183,6 +187,7 @@ async def _stream_chat_completion(
         async for piece in qa_answer_stream(
             query=query,
             instruction_context=instruction_context,
+            raise_generation_errors=True,
         ):
             if SOURCES_MARKER in piece:
                 piece, _ = piece.split(SOURCES_MARKER, 1)

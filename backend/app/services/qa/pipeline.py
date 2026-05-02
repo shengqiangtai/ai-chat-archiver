@@ -130,7 +130,9 @@ async def qa_answer(
         return result
 
     source_chunk_ids = [hit.chunk_id for hit in hits]
-    cached_answer = get_cache().get_answer(query, source_chunk_ids, mode=mode)
+    cached_answer = None
+    if instruction_context is None:
+        cached_answer = get_cache().get_answer(query, source_chunk_ids, mode=mode)
     if cached_answer:
         result = AnswerResult(
             answer=str(cached_answer.get("answer") or ""),
@@ -220,18 +222,19 @@ async def qa_answer(
             "retrieved": [asdict(h) for h in hits],
         }
 
-    get_cache().set_answer(
-        query,
-        source_chunk_ids,
-        {
-            "answer": result.answer,
-            "citations": [asdict(c) for c in result.citations],
-            "uncertainty": result.uncertainty,
-            "sources": [asdict(s) for s in result.sources],
-            "debug": result.debug,
-        },
-        mode=mode,
-    )
+    if instruction_context is None:
+        get_cache().set_answer(
+            query,
+            source_chunk_ids,
+            {
+                "answer": result.answer,
+                "citations": [asdict(c) for c in result.citations],
+                "uncertainty": result.uncertainty,
+                "sources": [asdict(s) for s in result.sources],
+                "debug": result.debug,
+            },
+            mode=mode,
+        )
 
     total = time.time() - t0
     logger.info("QA 完成: query=%r, hits=%d, time=%.2fs", query[:50], len(hits), total)
@@ -253,6 +256,7 @@ async def qa_answer_stream(
     graph_mode: str = "auto",
     rewrite_query_enabled: bool = True,
     instruction_context: str | None = None,
+    raise_generation_errors: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     流式 QA 问答。
@@ -309,6 +313,8 @@ async def qa_answer_stream(
             yield token
     except Exception as e:
         logger.warning("流式生成失败: %s", e)
+        if raise_generation_errors:
+            raise
         yield build_fallback_answer(hits)
     finally:
         # 低内存模式：流式生成完毕后卸载模型

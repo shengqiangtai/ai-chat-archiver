@@ -161,6 +161,12 @@ UNLOAD_GENERATOR_AFTER_INFERENCE = (
 LMSTUDIO_BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
 LMSTUDIO_MODEL = os.getenv("LMSTUDIO_MODEL", "")  # 空字符串 = 使用 LM Studio 当前加载的模型
 
+# ── 通用 OpenAI 兼容 API ─────────────────────────────────────────────────
+OPENAI_COMPAT_BASE_URL = os.getenv("OPENAI_COMPAT_BASE_URL", "http://localhost:1234/v1")
+OPENAI_COMPAT_API_KEY = os.getenv("OPENAI_COMPAT_API_KEY", "")
+OPENAI_COMPAT_MODEL = os.getenv("OPENAI_COMPAT_MODEL", "ai-chat-archiver-rag")
+OPENAI_COMPAT_PROVIDER_NAME = os.getenv("OPENAI_COMPAT_PROVIDER_NAME", "OpenAI Compatible")
+
 # ── Ollama（备用后端） ────────────────────────────────────────────────────
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
@@ -183,7 +189,10 @@ def _default_runtime() -> dict[str, Any]:
         "last_index_time": None,
         "ollama_model": OLLAMA_MODEL,
         "lmstudio_model": LMSTUDIO_MODEL,
-        "generator_backend": "lmstudio",  # 默认使用 LM Studio
+        "openai_compatible_base_url": OPENAI_COMPAT_BASE_URL,
+        "openai_compatible_model": OPENAI_COMPAT_MODEL,
+        "openai_compatible_provider_name": OPENAI_COMPAT_PROVIDER_NAME,
+        "generator_backend": "lmstudio",
     }
 
 
@@ -232,6 +241,38 @@ def get_current_lmstudio_model() -> str:
 def set_current_lmstudio_model(model_name: str) -> None:
     data = load_runtime_config()
     data["lmstudio_model"] = model_name
+    save_runtime_config(data)
+
+
+def get_current_openai_compatible_base_url() -> str:
+    return str(load_runtime_config().get("openai_compatible_base_url") or OPENAI_COMPAT_BASE_URL)
+
+
+def get_current_openai_compatible_model() -> str:
+    return str(load_runtime_config().get("openai_compatible_model") or OPENAI_COMPAT_MODEL)
+
+
+def get_current_openai_compatible_provider_name() -> str:
+    return str(
+        load_runtime_config().get("openai_compatible_provider_name")
+        or OPENAI_COMPAT_PROVIDER_NAME
+    )
+
+
+def set_current_openai_compatible_config(
+    base_url: str | None = None,
+    model: str | None = None,
+    provider_name: str | None = None,
+) -> None:
+    data = load_runtime_config()
+    if base_url is not None:
+        data["openai_compatible_base_url"] = base_url.strip()
+    if model is not None:
+        data["openai_compatible_model"] = model.strip()
+    if provider_name is not None:
+        data["openai_compatible_provider_name"] = provider_name.strip()
+    data.pop("openai_compatible_api_key", None)
+    data.pop("api_key", None)
     save_runtime_config(data)
 
 

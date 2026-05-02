@@ -152,6 +152,7 @@ async def create_chat_completion(data: OpenAIChatCompletionRequest):
         result = await qa_answer(
             query=query,
             instruction_context=instruction_context,
+            rewrite_query_enabled=False,
             raise_generation_errors=True,
         )
     except Exception as err:
@@ -188,6 +189,7 @@ async def _stream_chat_completion(
         async for piece in qa_answer_stream(
             query=query,
             instruction_context=instruction_context,
+            rewrite_query_enabled=False,
             raise_generation_errors=True,
         ):
             if SOURCES_MARKER in piece:

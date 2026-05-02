@@ -222,6 +222,53 @@ async def _openai_compatible_generator_streams_delta_content() -> None:
     assert chunks == ["hel", "lo"]
 
 
+def test_openai_compatible_generator_rejects_empty_choices() -> None:
+    asyncio.run(_openai_compatible_generator_rejects_empty_choices())
+
+
+async def _openai_compatible_generator_rejects_empty_choices() -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json={"choices": []})
+
+    transport = httpx.MockTransport(handler)
+    generator = OpenAICompatibleGenerator(
+        base_url="https://api.example.com/v1",
+        api_key="",
+        model="example-chat",
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    )
+
+    with pytest.raises(RuntimeError, match="空 choices"):
+        await generator.generate("Question")
+
+
+def test_openai_compatible_generator_rejects_empty_stream() -> None:
+    asyncio.run(_openai_compatible_generator_rejects_empty_stream())
+
+
+async def _openai_compatible_generator_rejects_empty_stream() -> None:
+    from app.services.llm.generator import OpenAICompatibleGenerator
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, content=b"data: [DONE]\n\n")
+
+    transport = httpx.MockTransport(handler)
+    generator = OpenAICompatibleGenerator(
+        base_url="https://api.example.com/v1",
+        api_key="",
+        model="example-chat",
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    )
+
+    with pytest.raises(RuntimeError, match="流式响应为空"):
+        async for _ in generator.generate_stream("Question"):
+            pass
+
+
 def test_openai_compatible_generator_availability_uses_models_endpoint() -> None:
     asyncio.run(_openai_compatible_generator_availability_uses_models_endpoint())
 
@@ -422,3 +469,31 @@ async def _generator_provider_can_raise_openai_stream_errors_before_tokens(
     with pytest.raises(RuntimeError, match="remote stream failed"):
         async for _ in provider.generate_stream("Question", raise_backend_errors=True):
             pass
+
+
+def test_generator_provider_strict_lmstudio_generate_errors(monkeypatch) -> None:
+    asyncio.run(_generator_provider_strict_lmstudio_generate_errors(monkeypatch))
+
+
+async def _generator_provider_strict_lmstudio_generate_errors(monkeypatch) -> None:
+    import app.services.llm.generator as generator_module
+
+    class FakeLMStudio:
+        async def is_available(self):
+            return False
+
+    class FakeTransformers:
+        is_available = True
+
+        def generate(self, prompt, max_tokens):
+            del prompt, max_tokens
+            return "fallback answer"
+
+    monkeypatch.setattr(generator_module, "get_generator_backend", lambda: "lmstudio")
+
+    provider = generator_module.GeneratorProvider()
+    provider._lmstudio = FakeLMStudio()
+    provider._transformers = FakeTransformers()
+
+    with pytest.raises(RuntimeError, match="LM Studio 不可用"):
+        await provider.generate("Question", raise_backend_errors=True)

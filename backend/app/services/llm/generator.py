@@ -196,8 +196,11 @@ class OpenAICompatibleGenerator:
             data = resp.json()
         choices = data.get("choices") or []
         if not choices:
-            return ""
-        return str(choices[0].get("message", {}).get("content") or "").strip()
+            raise RuntimeError("OpenAI 兼容 API 返回空 choices")
+        content = choices[0].get("message", {}).get("content")
+        if content is None:
+            raise RuntimeError("OpenAI 兼容 API 响应缺少 message.content")
+        return str(content).strip()
 
     async def generate_stream(
         self,
@@ -220,6 +223,7 @@ class OpenAICompatibleGenerator:
                 headers=self._headers(),
             ) as resp:
                 resp.raise_for_status()
+                yielded_any = False
                 async for line in resp.aiter_lines():
                     text = (line or "").strip()
                     if not text or not text.startswith("data:"):
@@ -234,7 +238,10 @@ class OpenAICompatibleGenerator:
                     delta = (chunk.get("choices") or [{}])[0].get("delta", {})
                     content = delta.get("content")
                     if content:
+                        yielded_any = True
                         yield str(content)
+                if not yielded_any:
+                    raise RuntimeError("OpenAI 兼容 API 流式响应为空")
 
     async def is_available(self) -> bool:
         try:
@@ -505,8 +512,12 @@ class GeneratorProvider:
                     return await lm.generate(prompt, max_tokens, system_prompt=system_prompt)
                 except Exception as e:
                     logger.warning("LM Studio 生成失败: %s", e)
+                    if raise_backend_errors:
+                        raise
             else:
                 logger.warning("LM Studio 不可用，尝试其他后端")
+                if raise_backend_errors:
+                    raise RuntimeError("LM Studio 不可用")
 
         if backend == "openai_compatible":
             compat = self.get_openai_compatible()
@@ -527,6 +538,10 @@ class GeneratorProvider:
                     return await ollama.generate(full, max_tokens)
                 except Exception as e:
                     logger.warning("Ollama 生成失败: %s", e)
+                    if raise_backend_errors:
+                        raise
+            elif backend == "ollama" and raise_backend_errors:
+                raise RuntimeError("Ollama 不可用")
 
         # 3. transformers 兜底
         gen = self.get_transformers()
@@ -558,6 +573,10 @@ class GeneratorProvider:
                     return
                 except Exception as e:
                     logger.warning("LM Studio 流式生成失败: %s", e)
+                    if raise_backend_errors:
+                        raise
+            elif raise_backend_errors:
+                raise RuntimeError("LM Studio 不可用")
 
         if backend == "openai_compatible":
             compat = self.get_openai_compatible()
@@ -583,6 +602,10 @@ class GeneratorProvider:
                     return
                 except Exception as e:
                     logger.warning("Ollama 流式生成失败: %s", e)
+                    if raise_backend_errors:
+                        raise
+            elif backend == "ollama" and raise_backend_errors:
+                raise RuntimeError("Ollama 不可用")
 
         # 3. transformers 模拟流式
         gen = self.get_transformers()
@@ -595,6 +618,8 @@ class GeneratorProvider:
                 await asyncio.sleep(0.01)
             return
 
+        if raise_backend_errors:
+            raise RuntimeError("所有生成后端均不可用。请确认 LM Studio 已启动并加载了模型。")
         yield "所有生成后端均不可用。请确认 LM Studio 已启动并加载了模型。"
 
 

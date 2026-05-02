@@ -75,6 +75,7 @@ def test_v1_chat_completions_non_streaming(monkeypatch) -> None:
             "system: Be concise.\n\n"
             "developer: Prefer cited answers."
         )
+        assert kwargs["rewrite_query_enabled"] is False
         assert kwargs["raise_generation_errors"] is True
         return DummyAnswer(
             answer="Indexed answer",
@@ -122,6 +123,7 @@ def test_v1_chat_completions_non_streaming_uses_server_error(monkeypatch) -> Non
 
     async def fake_qa_answer(**kwargs):
         assert kwargs["query"] == "Trigger error"
+        assert kwargs["rewrite_query_enabled"] is False
         assert kwargs["raise_generation_errors"] is True
         raise RuntimeError("generate failed")
 
@@ -168,6 +170,7 @@ def test_v1_chat_completions_streaming(monkeypatch) -> None:
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Stream this"
         assert kwargs["instruction_context"] is None
+        assert kwargs["rewrite_query_enabled"] is False
         assert kwargs["raise_generation_errors"] is True
         yield "Hel"
         yield "lo"
@@ -207,6 +210,7 @@ def test_v1_chat_completions_streaming_hides_sources_marker(monkeypatch) -> None
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Hide metadata"
         assert kwargs["instruction_context"] is None
+        assert kwargs["rewrite_query_enabled"] is False
         assert kwargs["raise_generation_errors"] is True
         yield "Answer"
         yield "\n\n[SOURCES_JSON][]"
@@ -236,6 +240,7 @@ def test_v1_chat_completions_streaming_uses_error_payload(monkeypatch) -> None:
 
     async def fake_stream(**kwargs):
         assert kwargs["query"] == "Trigger error"
+        assert kwargs["rewrite_query_enabled"] is False
         assert kwargs["raise_generation_errors"] is True
         raise RuntimeError("stream failed")
         yield

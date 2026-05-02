@@ -118,13 +118,50 @@ curl -X POST http://localhost:8765/api/kb/reindex
 
 ## LLM Backends
 
-系统支持三种生成后端：
+系统支持四种生成后端：
 
 | Backend | 说明 | 推荐场景 |
 |---|---|---|
 | `LM Studio` | OpenAI 兼容 API，适合本地 GGUF 模型 | macOS 本地部署首选 |
 | `Ollama` | 模型管理简单 | Linux 或轻量服务环境 |
 | `transformers` | Python 直接推理 | 兜底方案 |
+| `OpenAI Compatible` | DeepSeek、OpenRouter、SiliconFlow、vLLM、自建兼容服务等 | 使用云端或外部兼容服务 |
+
+### OpenAI Compatible Providers
+
+项目也可以调用任意 OpenAI 兼容的 `/v1/chat/completions` 服务。
+
+```bash
+export OPENAI_COMPAT_BASE_URL="https://api.deepseek.com/v1"
+export OPENAI_COMPAT_API_KEY="your-api-key"
+export OPENAI_COMPAT_MODEL="deepseek-chat"
+export OPENAI_COMPAT_PROVIDER_NAME="DeepSeek"
+```
+
+启动后切换生成后端：
+
+```bash
+curl -X PUT http://localhost:8765/api/kb/llm/backend \
+  -H "Content-Type: application/json" \
+  -d '{"backend":"openai_compatible","model":"deepseek-chat"}'
+```
+
+API key 只从环境变量读取，不会写入 `AI-Chats/config.json`。
+
+### OpenAI-Compatible Local RAG API
+
+标准 LLM 客户端可以把本项目作为 OpenAI 兼容服务使用：
+
+- Base URL: `http://127.0.0.1:8765/v1`
+- API Key: 任意非空字符串
+- Model: `ai-chat-archiver-rag`
+
+常用端点：
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+这些端点会调用本项目的知识库 RAG pipeline，而不是裸模型对话。
 
 ### LM Studio
 
